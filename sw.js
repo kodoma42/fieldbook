@@ -1,5 +1,5 @@
 'use strict';
-const CACHE = 'fieldbook-v7';
+const CACHE = 'fieldbook-1.1'; // bei jeder neuen Version anpassen
 const FILES = ['./', 'index.html', 'crypto.js', 'app.js', 'manifest.webmanifest', 'icon-180.png', 'icon-512.png'];
 
 self.addEventListener('install', (e) => {

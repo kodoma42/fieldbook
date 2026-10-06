@@ -3,6 +3,7 @@
   const C = MPCrypto;
   const META_KEY = 'mp_meta_v1';
   const DATA_KEY = 'mp_data_v1';
+  const APP_VERSION = '1.1';
   const root = document.getElementById('app');
 
   /* ------------------------------------------------------------------ */
@@ -337,7 +338,7 @@
 
   async function exportBackup() {
     const backup = {
-      format: 'messprotokoll-backup', v: 1, app: 'Work Companion Fieldbook', // Formatname bleibt für alte Backups
+      format: 'messprotokoll-backup', v: 1, app: 'Work Companion Fieldbook', appVersion: APP_VERSION, // Formatname bleibt für alte Backups
       created: new Date().toISOString(),
       pw: meta.pw, settings: meta.settings, data: await C.encryptJSON(db, dataKey),
     };
@@ -589,7 +590,8 @@
       h('div', { class: 'hint', text: 'Wichtig: Es gibt keine Passwort-Wiederherstellung. Wer das Passwort (und den Passkey) verliert, verliert die Daten. Erstelle deshalb regelmäßig ein verschlüsseltes Backup.' }),
       h('button', { class: 'btn link', type: 'button', onclick: () => restoreFromBackup(restoreErr), text: 'Aus Backup wiederherstellen' }),
       restoreErr,
-      installHint()));
+      installHint(),
+      versionLine()));
   }
 
   function renderLock() {
@@ -630,7 +632,12 @@
     kids.push(h('div', { class: 'stack' }, pw, meta.pk ? h('button', { class: 'btn sec', type: 'button', onclick: submit, text: 'Mit Passwort entsperren' }) : btn), err);
     // Ein Button genügt: bei Passkey-Variante den eigentlichen Button nicht doppelt anzeigen
     kids.push(h('button', { class: 'btn link', type: 'button', onclick: () => restoreOrAdd(err), text: 'Backup einspielen' }));
+    kids.push(versionLine());
     root.append(h('div', { class: 'center' }, kids));
+  }
+
+  function versionLine() {
+    return h('div', { class: 'version', text: 'Version ' + APP_VERSION });
   }
 
   function header(title, left, right) {
@@ -873,7 +880,7 @@
               view = 'setup'; render();
             },
           })),
-        h('p', { class: 'muted small', style: 'text-align:center', text: 'Work Companion Fieldbook · Daten bleiben lokal auf diesem Gerät' })));
+        h('p', { class: 'muted small', style: 'text-align:center', text: 'Work Companion Fieldbook ' + APP_VERSION + ' · Daten bleiben lokal auf diesem Gerät' })));
   }
 
   /* ------------------------------------------------------------------ */

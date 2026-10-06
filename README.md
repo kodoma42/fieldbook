@@ -64,6 +64,15 @@ Die App ist dann unter `https://DEINNAME.github.io/fieldbook/` erreichbar.
 
 Updates später: geänderte Dateien ersetzen, dann `git add . && git commit -m "Update" && git push`.
 
+## Versionen
+
+- **1.1** (06.10.2026): Startet ohne Netz sofort aus dem Speicher (vorher weißer Bildschirm im Flugmodus).
+  Versionsnummer auf Start- und Sperrbildschirm und in der Fußzeile.
+- **1.0** (06.10.2026): Erste Version.
+
+Neue Version: `APP_VERSION` in `app.js` und `CACHE` in `sw.js` erhöhen. Updates erscheinen auf dem Gerät
+erst beim übernächsten Start mit Netz.
+
 ## Wichtig
 
 - Der Passkey ist an die **Domain** gebunden. Wird die Adresse später geändert, funktioniert er nicht mehr
