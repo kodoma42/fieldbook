@@ -20,6 +20,18 @@ Erst dann Passwort und Face ID einrichten.
 
 ## Versionen
 
+- **1.5.4** (07.10.2026): Spesen in Violett (Marke an den Einträgen, Hinweis im Eintrag, hinterlegte Tage im Kalender),
+  damit sie sich klar vom orangen "Wartung" unterscheiden. Der Backup-Hinweis bleibt orange.
+- **1.5.3** (07.10.2026): Korrekturen nach der Prüfung: Spesen-Marke im Dunkelmodus wieder lesbar, Kalenderpunkte
+  überdecken die Tageszahl nicht mehr, Einrichtungs- und Sperrbildschirm rutschen nicht unter die Statusleiste,
+  Knöpfe und Zeitfelder passen auch auf kleinen iPhones mit großer Schrift, Kopfzeile im Dunkelmodus besser abgesetzt.
+- **1.5.2** (07.10.2026): Einsatzarten in neuen Farben (Installation hellblau, Wartung orange, Reparatur türkis).
+  Im Kalender zeigt ein kleiner Punkt je Einsatzart in der Ecke des Tages, was dort erledigt wurde (mit Legende).
+  Der Spesen-Hinweis ist jetzt eine gefüllte Marke, damit er sich vom orangen "Wartung" unterscheidet.
+- **1.5.1** (07.10.2026): Neues Aussehen: Marineblau für Kopfzeile, Überschriften und Haupt-Buttons, eigene Farben für
+  Installation, Wartung und Reparatur, Orange für Hinweise (Backup, Spesen) und Rot für Fehler, überarbeiteter
+  Dunkelmodus, kräftigere Kontraste, größere Tippflächen, Einstellung "Schriftgröße" (Normal / Groß).
+  In der Eintragsansicht klebt nur noch "Speichern" unten.
 - **1.5** (07.10.2026): Messwerte schrittweise: Ein neuer Eintrag zeigt zuerst ein Messfeld, weitere kommen
   mit "Messwert hinzufügen". Mehr als 10 Messfelder möglich (bis 50), Name und Einheit zentral in den
   Einstellungen. Updates werden nur noch als Ganzes übernommen.

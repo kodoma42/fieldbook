@@ -3,7 +3,7 @@
   const C = MPCrypto;
   const META_KEY = 'mp_meta_v1';
   const DATA_KEY = 'mp_data_v1';
-  const APP_VERSION = '1.5';
+  const APP_VERSION = '1.5.4';
   const root = document.getElementById('app');
 
   /* ------------------------------------------------------------------ */
@@ -384,6 +384,7 @@
     lastBackup: null,
     snoozeUntil: 0,
     spesenMin: 480, // Spesen-Hinweis ab mehr als 8 Stunden Fahr- + Arbeitszeit pro Tag (0 = aus)
+    fontSize: 'normal', // 'normal' | 'big'
     autoPasskey: true, // Face ID beim Öffnen automatisch starten (wenn ein Passkey eingerichtet ist)
     templates: defaultTemplates(),
     fields: Array.from({ length: 10 }, (_, i) => ({ name: 'Messwert ' + (i + 1), unit: '' })),
@@ -408,12 +409,18 @@
   if (meta) {
     meta.settings = Object.assign(defaultSettings(), meta.settings || {});
     fixFields(meta.settings);
+    if (meta.settings.fontSize !== 'big') meta.settings.fontSize = 'normal';
+    applyFontSize();
   }
 
   const persistMeta = () => store.set(META_KEY, meta);
 
   // Messfelder: Liste in den Einstellungen, mindestens 1, höchstens MAX_FIELDS (beim Hinzufügen).
   // Einträge speichern ihre Werte nach Position (values[0] = erstes Messfeld).
+  function applyFontSize() {
+    const big = meta && meta.settings && meta.settings.fontSize === 'big';
+    document.documentElement.setAttribute('data-fs', big ? 'big' : 'normal');
+  }
   function fixFields(s) {
     if (!Array.isArray(s.fields)) s.fields = defaultSettings().fields;
     // Kaputte Einträge werden ersetzt, nicht entfernt: sonst rutschen Namen auf falsche Werte
@@ -466,6 +473,7 @@
   function go(v) { view = v; render(); window.scrollTo(0, 0); }
 
   function afterUnlock() {
+    applyFontSize();
     view = 'list'; search = ''; lastActivity = Date.now();
     const now = new Date();
     cal = { y: now.getFullYear(), m: now.getMonth() }; calDay = todayStr();
@@ -664,9 +672,9 @@
     return h('div', { class: 'banner', role: 'alert' },
       h('div', { text: due.never ? 'Du hast noch kein Backup erstellt.' : `Dein letztes Backup ist ${due.days} ${due.days === 1 ? 'Tag' : 'Tage'} alt.` }),
       h('div', { class: 'row', style: 'margin-top:10px' },
-        h('button', { class: 'btn', type: 'button', style: 'font-size:15px;padding:12px 8px', text: 'Jetzt sichern', onclick: () => exportBackup().catch((e) => toast(e.message || String(e))) }),
+        h('button', { class: 'btn', type: 'button', style: 'font-size:calc(15px*var(--fs));padding:12px 8px', text: 'Jetzt sichern', onclick: () => exportBackup().catch((e) => toast(e.message || String(e))) }),
         h('button', {
-          class: 'btn sec', type: 'button', style: 'font-size:15px;padding:12px 8px', text: 'Morgen erinnern',
+          class: 'btn sec', type: 'button', style: 'font-size:calc(15px*var(--fs));padding:12px 8px', text: 'Morgen erinnern',
           onclick: () => { meta.settings.snoozeUntil = Date.now() + 86400000; persistMeta(); render(); },
         })));
   }
@@ -1107,7 +1115,7 @@
         e.customerId && h('span', { class: 'tag', text: e.customerId })),
       e.serial && h('div', { class: 'muted small', text: 'SN ' + e.serial }),
       h('div', { class: 'chips' },
-        e.kind && h('span', { class: 'chip kind', text: kindLabel(e.kind) }),
+        e.kind && h('span', { class: 'chip kind k-' + e.kind, text: kindLabel(e.kind) }),
         h('span', { class: 'chip' }, 'Fahrt ', h('b', { text: fmtDur(e.driveMin) })),
         h('span', { class: 'chip' }, 'Arbeit ', h('b', { text: fmtDur(e.workMin) })),
         filled > 0 && h('span', { class: 'chip' }, 'Messwerte ', h('b', { text: String(filled) })),
@@ -1341,9 +1349,14 @@
       const days = new Date(y, m + 1, 0).getDate();
       let spDays = 0; let count = 0; let drive = 0; let work = 0;
       const prefix = `${y}-${pad2(m + 1)}-`;
+      const kindsOfDay = new Map(); // Datum -> Menge der Einsatzarten
       for (const e of db.entries) {
         if (!(e.date || '').startsWith(prefix)) continue;
         count++; drive += e.driveMin || 0; work += e.workMin || 0;
+        if (KINDS.some((k) => k[0] === e.kind)) {
+          if (!kindsOfDay.has(e.date)) kindsOfDay.set(e.date, new Set());
+          kindsOfDay.get(e.date).add(e.kind);
+        }
       }
       gridEl.replaceChildren(...WEEKDAYS.map((d) => h('div', { class: 'calwd', text: d })));
       for (let i = 0; i < offset; i++) gridEl.append(h('div'));
@@ -1352,12 +1365,15 @@
         const tot = totals.get(iso) || 0;
         const sp = isSpesen(tot);
         if (sp) spDays++;
+        // ein Punkt je vorkommender Einsatzart (höchstens drei), in fester Reihenfolge
+        const dayKinds = KINDS.filter((k) => (kindsOfDay.get(iso) || new Set()).has(k[0]));
         gridEl.append(h('button', {
           class: 'calday' + (tot > 0 ? ' has' : '') + (sp ? ' sp' : '') + (iso === todayStr() ? ' today' : '') + (iso === calDay ? ' sel' : ''),
           type: 'button', 'aria-pressed': iso === calDay ? 'true' : 'false',
-          'aria-label': `${fmtDay(iso)}${tot > 0 ? ', ' + fmtDur(tot) + ' Stunden' : ''}${sp ? ', Spesen' : ''}`,
+          'aria-label': `${fmtDay(iso)}${tot > 0 ? ', ' + fmtDur(tot) + ' Stunden' : ''}${dayKinds.length ? ', ' + dayKinds.map((k) => k[1]).join(', ') : ''}${sp ? ', Spesen' : ''}`,
           onclick: () => { calDay = iso; paint(); },
-        }, h('span', { class: 'dn', text: String(d) }), tot > 0 && h('span', { class: 'dt', text: fmtDur(tot) })));
+        }, dayKinds.length > 0 && h('span', { class: 'caldots', 'aria-hidden': 'true' }, dayKinds.map((k) => h('span', { class: 'caldot k-' + k[0] }))),
+        h('span', { class: 'dn', text: String(d) }), tot > 0 && h('span', { class: 'dt', text: fmtDur(tot) })));
       }
       statEl.replaceChildren(
         spesenLimit() > 0
@@ -1398,7 +1414,8 @@
           titleEl,
           h('button', { class: 'ibtn', type: 'button', 'aria-label': 'Nächster Monat', onclick: () => shift(1) }, icon('next'))),
         statEl, gridEl,
-        h('div', { class: 'muted small', style: 'margin:8px 2px 0', text: 'Farbig: Tage, an denen Fahrzeit plus Arbeitszeit über der Spesen-Grenze liegt. Die Grenze stellst du in den Einstellungen ein.' }),
+        h('div', { class: 'callegend small' }, KINDS.map((k) => h('span', {}, h('i', { class: 'caldot k-' + k[0], 'aria-hidden': 'true' }), ' ' + k[1]))),
+        h('div', { class: 'muted small', style: 'margin:8px 2px 0', text: 'Violett hinterlegt: Tage, an denen Fahrzeit plus Arbeitszeit über der Spesen-Grenze liegt. Die Grenze stellst du in den Einstellungen ein. Die Punkte oben rechts zeigen die Einsatzarten des Tages.' }),
         panelEl),
       tabbar());
     paint();
@@ -1622,11 +1639,11 @@
         h('div', { class: 'sect' }, h('h2', { text: 'Messwerte' }), measBox, addMeasBtn),
         h('div', { class: 'sect' }, h('h2', { text: 'Notiz' }), note),
         err,
-        h('div', { class: 'footer-actions stack' },
-          h('button', { class: 'btn', type: 'button', onclick: onSave, text: 'Speichern' }),
-          !isNew && h('div', { class: 'row' },
-            h('button', { class: 'btn sec', type: 'button', onclick: onCopy, text: 'Kopie anlegen' }),
-            h('button', { class: 'btn danger', type: 'button', onclick: onDelete, text: 'Löschen' })))));
+        h('div', { class: 'footer-actions' },
+          h('button', { class: 'btn', type: 'button', onclick: onSave, text: 'Speichern' })),
+        !isNew && h('div', { class: 'row sec-actions' },
+          h('button', { class: 'btn sec', type: 'button', onclick: onCopy, text: 'Kopie anlegen' }),
+          h('button', { class: 'btn danger', type: 'button', onclick: onDelete, text: 'Löschen' }))));
   }
 
   function renderSettings() {
@@ -1636,6 +1653,12 @@
       onchange: (e) => { s.lockMin = Number(e.target.value); persistMeta(); toast('Gespeichert.'); },
     }, [[0, 'Sofort beim Verlassen'], [1, 'Nach 1 Minute'], [2, 'Nach 2 Minuten'], [5, 'Nach 5 Minuten'], [15, 'Nach 15 Minuten']]
       .map(([v, t]) => h('option', { value: String(v), text: t, selected: v === s.lockMin })));
+
+    const fsSel = h('select', {
+      'aria-label': 'Schriftgröße',
+      onchange: (e) => { s.fontSize = e.target.value === 'big' ? 'big' : 'normal'; persistMeta(); applyFontSize(); toast('Gespeichert.'); },
+    }, [['normal', 'Normal'], ['big', 'Groß']]
+      .map(([v, tx]) => h('option', { value: v, text: tx, selected: v === s.fontSize })));
 
     const backupSel = h('select', {
       onchange: (e) => { s.backupDays = Number(e.target.value); s.snoozeUntil = 0; persistMeta(); toast('Gespeichert.'); },
@@ -1734,6 +1757,9 @@
     root.append(
       header('Einstellungen', null, lockBtn()),
       h('main', { class: 'wrap' },
+        h('div', { class: 'sect' }, h('h2', { text: 'Darstellung' }),
+          h('label', { class: 'f', style: 'margin:0' }, h('span', { text: 'Schriftgröße' }), fsSel),
+          h('p', { class: 'muted small', style: 'margin:8px 0 0', text: 'Groß hilft draußen bei Sonne oder mit Handschuhen. Es gilt für die ganze App.' })),
         h('div', { class: 'sect' }, h('h2', { text: 'Sicherheit' }),
           h('label', { class: 'f' }, h('span', { text: 'Automatisch sperren' }), lockSel),
           pkRow,
@@ -1814,6 +1840,7 @@
               if (!await confirmDlg('Wirklich alles löschen?', 'Alle Einträge, das Passwort und der Passkey-Bezug werden von diesem Gerät entfernt. Ohne Backup sind die Daten verloren.', 'Alles löschen', true)) return;
               store.del(META_KEY); store.del(DATA_KEY);
               meta = null; dataKey = null; db = null; editing = null;
+              applyFontSize();
               view = 'setup'; render();
             },
           })),
