@@ -3,7 +3,7 @@
   const C = MPCrypto;
   const META_KEY = 'mp_meta_v1';
   const DATA_KEY = 'mp_data_v1';
-  const APP_VERSION = '1.1';
+  const APP_VERSION = '1.5';
   const root = document.getElementById('app');
 
   /* ------------------------------------------------------------------ */
@@ -34,6 +34,10 @@
     lock: '<svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>',
     plus: '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',
     back: '<svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>',
+    next: '<svg viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>',
+    list: '<svg viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>',
+    users: '<svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
+    cal: '<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>',
   };
   function icon(name) {
     const s = document.createElement('span');
@@ -130,13 +134,258 @@
   }
 
   /* ------------------------------------------------------------------ */
+  /* Wiederherstellung: Code und Sicherheitsfragen                       */
+  /* ------------------------------------------------------------------ */
+  const SECRET_NAMES = { pw: 'Passwort', rc: 'Wiederherstellungscode', sq: 'Sicherheitsfragen' };
+  const SECRET_ERR = {
+    pw: 'Falsches Passwort.',
+    rc: 'Falscher Wiederherstellungscode.',
+    sq: 'Mindestens eine Antwort stimmt nicht. Groß-/Kleinschreibung und Leerzeichen sind egal.',
+  };
+
+  // Öffnet die Schlüssel-Hülle src.pw / src.rc / src.sq mit dem passenden Geheimnis s.
+  async function unwrapBySecret(src, s) {
+    if (s.kind === 'rc' && C.normCode(s.value).length !== 20) {
+      throw new Error('Der Code hat 20 Zeichen (5 Gruppen zu je 4).');
+    }
+    try {
+      if (s.kind === 'pw') return await C.unwrapWithPassword(src.pw, s.value);
+      if (s.kind === 'rc') return await C.unwrapWithPassword(src.rc, C.normCode(s.value));
+      return await C.unwrapWithPassword(src.sq, C.answersSecret(s.answers));
+    } catch { throw new Error(SECRET_ERR[s.kind]); }
+  }
+
+  // Fragt nach Passwort, Wiederherstellungscode oder Antworten auf die Sicherheitsfragen.
+  // Mit verify(secret) wird direkt im Dialog geprüft (Fehler erscheinen dort, man kann es nochmal versuchen);
+  // das Ergebnis von verify wird zurückgegeben. Abbrechen gibt null zurück.
+  function askSecret({ title, text, ok = 'Weiter', pw = true, rc = false, sq = null, verify = null }) {
+    const modes = [];
+    if (pw) modes.push('pw');
+    if (rc) modes.push('rc');
+    if (sq && sq.questions && sq.questions.length) modes.push('sq');
+    return modal((box, close) => {
+      let mode = modes[0];
+      let getSecret = () => null;
+      const err = h('div', { class: 'err' });
+      const area = h('div', { class: 'stack' });
+      const switches = h('div', { class: 'stack', style: 'margin-top:4px' });
+      const btn = h('button', { class: 'btn', type: 'button', text: ok });
+      async function go() {
+        const s = getSecret();
+        if (!s) { err.textContent = mode === 'sq' ? 'Bitte alle Fragen beantworten.' : 'Bitte etwas eingeben.'; return; }
+        if (!verify) { close(s); return; }
+        btn.disabled = true; btn.textContent = 'Bitte warten …'; err.textContent = '';
+        try { close(await verify(s)); } catch (e) {
+          err.textContent = e.message || String(e);
+          btn.disabled = false; btn.textContent = ok;
+        }
+      }
+      function draw() {
+        err.textContent = '';
+        area.replaceChildren();
+        if (mode === 'pw') {
+          const i = h('input', { type: 'password', autocomplete: 'current-password', placeholder: 'Passwort' });
+          i.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
+          area.append(i);
+          getSecret = () => (i.value ? { kind: 'pw', value: i.value } : null);
+        } else if (mode === 'rc') {
+          const i = h('input', {
+            type: 'text', class: 'code-in', autocomplete: 'off', autocapitalize: 'characters', spellcheck: 'false',
+            placeholder: 'XXXX-XXXX-XXXX-XXXX-XXXX',
+          });
+          i.addEventListener('input', () => { i.value = C.formatCode(i.value).slice(0, 24); });
+          i.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
+          area.append(i);
+          getSecret = () => (C.normCode(i.value) ? { kind: 'rc', value: i.value } : null);
+        } else {
+          const labels = sq.questions.map((q) => h('label', { class: 'f' },
+            h('span', { text: q }),
+            h('input', { type: 'text', autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false' })));
+          area.append(...labels);
+          getSecret = () => {
+            const a = labels.map((l) => l.querySelector('input').value);
+            return a.every((x) => x.trim()) ? { kind: 'sq', answers: a } : null;
+          };
+        }
+        switches.replaceChildren(...modes.filter((m) => m !== mode).map((m) => h('button', {
+          class: 'btn link', type: 'button', text: 'Stattdessen: ' + SECRET_NAMES[m],
+          onclick: () => { mode = m; draw(); },
+        })));
+        const first = area.querySelector('input'); if (first) first.focus();
+      }
+      btn.addEventListener('click', go);
+      box.append(
+        h('h3', { text: title }),
+        text && h('p', { text }),
+        area, err,
+        h('div', { class: 'stack', style: 'margin-top:10px' }, btn, switches,
+          h('button', { class: 'btn link', type: 'button', onclick: () => close(null), text: 'Abbrechen' })));
+      draw();
+    });
+  }
+
+  // Die automatische Sperre pausiert, solange ein Ablauf läuft (z. B. beim Abschreiben des Codes).
+  async function noLock(fn) {
+    suspendLock++;
+    try { return await fn(); } finally {
+      setTimeout(() => { suspendLock = Math.max(0, suspendLock - 1); lastActivity = Date.now(); }, 500);
+    }
+  }
+
+  function recoverySheet(code) {
+    return modal((box, close) => {
+      const pretty = C.formatCode(code);
+      const mail = 'mailto:?subject=' + encodeURIComponent('Fieldbook Wiederherstellungscode') +
+        '&body=' + encodeURIComponent('Wiederherstellungscode für Work Companion Fieldbook:\n\n' + pretty + '\n\nDiese Mail danach löschen oder nur an einem sicheren Ort aufbewahren.');
+      box.classList.add('sheet');
+      box.append(
+        h('h3', { text: 'Notfallblatt' }),
+        h('div', { class: 'sheet-brand', text: 'Work Companion Fieldbook · Wiederherstellungscode' }),
+        h('div', { class: 'code-big', text: pretty }),
+        h('p', { class: 'sheet-date', text: 'Erstellt am ' + new Date().toLocaleDateString('de-DE') }),
+        h('p', { text: 'Mit diesem Code öffnest du die App und legst ein neues Passwort fest, falls Passwort und Face ID verloren sind. Der Code wird nur jetzt angezeigt. Schreibe ihn ab oder drucke das Blatt und bewahre es zu Hause auf, nicht neben dem iPhone. Wer Code und Gerät (oder ein Backup) hat, kommt an die Daten.' }),
+        h('div', { class: 'stack noprint' },
+          h('button', { class: 'btn sec', type: 'button', onclick: () => { try { window.print(); } catch { toast('Drucken geht hier nicht. Bitte abschreiben.'); } }, text: 'Drucken / als PDF sichern' }),
+          h('a', { class: 'btn sec', href: mail, text: 'Mail-Entwurf an mich selbst' }),
+          h('button', { class: 'btn', type: 'button', onclick: () => close(true), text: 'Ich habe den Code notiert' }),
+          h('button', { class: 'btn link', type: 'button', onclick: () => close(null), text: 'Abbrechen' })));
+    });
+  }
+
+  function verifyCodeDlg(code) {
+    const parts = C.formatCode(code).split('-');
+    return modal((box, close) => {
+      const mk = () => h('input', {
+        type: 'text', class: 'code-in', autocomplete: 'off', autocapitalize: 'characters', spellcheck: 'false',
+        maxlength: '4', placeholder: '····',
+      });
+      const a = mk(); const b = mk();
+      const err = h('div', { class: 'err' });
+      const check = () => {
+        if (C.normCode(a.value) === parts[1] && C.normCode(b.value) === parts[3]) close(true);
+        else err.textContent = 'Das stimmt nicht. Bitte vergleiche mit deinem Notfallblatt.';
+      };
+      box.append(
+        h('h3', { text: 'Kurze Kontrolle' }),
+        h('p', { text: 'Tippe zur Kontrolle die 2. und die 4. Gruppe des Codes so ein, wie du sie notiert hast.' }),
+        h('div', { class: 'row' },
+          h('label', { class: 'f' }, h('span', { text: '2. Gruppe' }), a),
+          h('label', { class: 'f' }, h('span', { text: '4. Gruppe' }), b)),
+        err,
+        h('div', { class: 'stack', style: 'margin-top:10px' },
+          h('button', { class: 'btn', type: 'button', onclick: check, text: 'Prüfen' }),
+          h('button', { class: 'btn link', type: 'button', onclick: () => close('back'), text: 'Zurück zum Code' })));
+    });
+  }
+
+  // Erzeugt einen neuen Code. Er gilt erst, wenn die Kontrolle bestanden ist; ein alter Code bleibt bis dahin gültig.
+  function createRecoveryCode() {
+    return noLock(async () => {
+      if (!dataKey) return false;
+      const code = C.newRecoveryCode();
+      const rc = await C.wrapWithPassword(dataKey, C.normCode(code));
+      for (;;) {
+        if (!await recoverySheet(code)) return false;
+        const v = await verifyCodeDlg(code);
+        if (v === true) break;
+        if (v === null) return false;
+      }
+      if (!meta || !dataKey) return false;
+      meta.rc = rc; persistMeta();
+      return true;
+    });
+  }
+
+  function questionsForm() {
+    return modal((box, close) => {
+      const qs = [0, 1, 2].map((i) => h('input', { type: 'text', maxlength: '80', autocomplete: 'off', placeholder: `Frage ${i + 1}${i === 2 ? ' (optional)' : ''}` }));
+      const as = [0, 1, 2].map((i) => h('input', { type: 'text', maxlength: '80', autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false', placeholder: 'Antwort' }));
+      const err = h('div', { class: 'err' });
+      const next = () => {
+        const pairs = [];
+        for (let i = 0; i < 3; i++) {
+          const q = qs[i].value.trim(); const a = as[i].value.trim();
+          if (!q && !a) continue;
+          if (!q || !a) { err.textContent = `Frage ${i + 1}: Bitte Frage und Antwort ausfüllen.`; return; }
+          if (a.replace(/\s+/g, '').length < 3) { err.textContent = `Frage ${i + 1}: Die Antwort ist zu kurz (mind. 3 Zeichen).`; return; }
+          pairs.push({ q, a });
+        }
+        if (pairs.length < 2) { err.textContent = 'Bitte mindestens zwei Fragen mit Antworten angeben.'; return; }
+        close(pairs);
+      };
+      box.append(
+        h('h3', { text: 'Sicherheitsfragen' }),
+        h('p', { text: 'Wähle zwei bis drei eigene Fragen, deren Antworten nur du kennst und die nirgends online stehen. Beim Zurücksetzen werden alle Antworten gebraucht; Groß-/Kleinschreibung und Leerzeichen sind egal. Das ist schwächer als der Wiederherstellungscode, und die Fragen selbst sind in der App lesbar gespeichert.' }),
+        h('div', { class: 'stack' }, qs[0], as[0], qs[1], as[1], qs[2], as[2]),
+        err,
+        h('div', { class: 'stack', style: 'margin-top:10px' },
+          h('button', { class: 'btn', type: 'button', onclick: next, text: 'Weiter' }),
+          h('button', { class: 'btn link', type: 'button', onclick: () => close(null), text: 'Abbrechen' })));
+    });
+  }
+
+  function questionsCheck(pairs) {
+    return modal((box, close) => {
+      const ins = pairs.map(() => h('input', { type: 'text', autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false', placeholder: 'Antwort noch einmal' }));
+      const err = h('div', { class: 'err' });
+      const norm = (x) => C.answersSecret([x]);
+      const check = () => {
+        if (pairs.every((p, i) => norm(ins[i].value) === norm(p.a))) close(true);
+        else err.textContent = 'Mindestens eine Antwort weicht ab. Bitte noch einmal eintippen.';
+      };
+      box.append(
+        h('h3', { text: 'Antworten bestätigen' }),
+        h('p', { text: 'Tippe die Antworten zur Kontrolle noch einmal ein, damit sich kein Tippfehler einschleicht.' }),
+        h('div', { class: 'stack' }, pairs.map((p, i) => h('label', { class: 'f' }, h('span', { text: p.q }), ins[i]))),
+        err,
+        h('div', { class: 'stack', style: 'margin-top:10px' },
+          h('button', { class: 'btn', type: 'button', onclick: check, text: 'Speichern' }),
+          h('button', { class: 'btn link', type: 'button', onclick: () => close(null), text: 'Abbrechen' })));
+    });
+  }
+
+  function setupQuestions() {
+    return noLock(async () => {
+      if (!dataKey) return false;
+      const pairs = await questionsForm();
+      if (!pairs) return false;
+      if (!await questionsCheck(pairs)) return false;
+      if (!meta || !dataKey) return false;
+      const w = await C.wrapWithPassword(dataKey, C.answersSecret(pairs.map((p) => p.a)));
+      meta.sq = Object.assign({ questions: pairs.map((p) => p.q) }, w);
+      persistMeta();
+      return true;
+    });
+  }
+
+  // Schützt Änderungen an den Wiederherstellungswegen vor jemandem, der nur das entsperrte iPhone in der Hand hält
+  async function requireCurrentPassword() {
+    const cur = await askPassword('Aktuelles Passwort', { ok: 'Weiter' });
+    if (!cur) return false;
+    try { await C.unwrapWithPassword(meta.pw, cur); } catch { toast('Falsches Passwort.'); return false; }
+    return !!dataKey;
+  }
+
+  /* ------------------------------------------------------------------ */
   /* Zustand                                                             */
   /* ------------------------------------------------------------------ */
+  // Art des Einsatzes und Vorlagentexte für die Notiz (in den Einstellungen änderbar)
+  const KINDS = [['installation', 'Installation'], ['wartung', 'Wartung'], ['reparatur', 'Reparatur']];
+  const kindLabel = (k) => (KINDS.find((x) => x[0] === k) || [])[1] || '';
+  const defaultTemplates = () => ({
+    installation: 'Das Gerät wurde installiert, angeschlossen und in Betrieb genommen. Der Server wurde eingerichtet, die Verbindung zwischen Server und Gerät funktioniert. Die Funktionsprüfung war in Ordnung.',
+    wartung: 'Die Wartung wurde durchgeführt. Das Gerät wurde geprüft und gereinigt. Die Funktionsprüfung war in Ordnung, es wurden keine Mängel festgestellt.',
+    reparatur: 'Die Störung wurde behoben. Die Funktionsprüfung nach der Reparatur war in Ordnung.',
+  });
+
   const defaultSettings = () => ({
     lockMin: 2,
     backupDays: 7,
     lastBackup: null,
     snoozeUntil: 0,
+    spesenMin: 480, // Spesen-Hinweis ab mehr als 8 Stunden Fahr- + Arbeitszeit pro Tag (0 = aus)
+    autoPasskey: true, // Face ID beim Öffnen automatisch starten (wenn ein Passkey eingerichtet ist)
+    templates: defaultTemplates(),
     fields: Array.from({ length: 10 }, (_, i) => ({ name: 'Messwert ' + (i + 1), unit: '' })),
   });
 
@@ -146,18 +395,49 @@
   let view = meta ? 'lock' : 'setup';
   let editing = null; // { entry, isNew }
   let search = '';
+  let filter = { from: '', to: '' }; // Datumsfilter der Eintragsliste
+  let selCustomer = null; // Schlüssel des geöffneten Kunden
+  let cal = { y: new Date().getFullYear(), m: new Date().getMonth() };
+  let calDay = null;
   let lastActivity = Date.now();
   let hiddenAt = null;
   let suspendLock = 0;
+  let autoTry = true; // Face ID automatisch starten: beim Öffnen der App, nicht nach manuellem Sperren
+  let lockUI = null; // { btn, err } des aktuellen Sperrbildschirms
 
   if (meta) {
     meta.settings = Object.assign(defaultSettings(), meta.settings || {});
-    while (meta.settings.fields.length < 10) {
-      meta.settings.fields.push({ name: 'Messwert ' + (meta.settings.fields.length + 1), unit: '' });
-    }
+    fixFields(meta.settings);
   }
 
   const persistMeta = () => store.set(META_KEY, meta);
+
+  // Messfelder: Liste in den Einstellungen, mindestens 1, höchstens MAX_FIELDS (beim Hinzufügen).
+  // Einträge speichern ihre Werte nach Position (values[0] = erstes Messfeld).
+  function fixFields(s) {
+    if (!Array.isArray(s.fields)) s.fields = defaultSettings().fields;
+    // Kaputte Einträge werden ersetzt, nicht entfernt: sonst rutschen Namen auf falsche Werte
+    s.fields = s.fields.map((f) => (f && typeof f === 'object' ? f : {}))
+      .map((f, i) => ({
+        name: (typeof f.name === 'string' ? f.name.trim().slice(0, 40) : '') || 'Messwert ' + (i + 1),
+        unit: typeof f.unit === 'string' ? f.unit.trim().slice(0, 12) : '',
+      }));
+    if (!s.fields.length) s.fields.push({ name: 'Messwert 1', unit: '' });
+  }
+  const lastFilled = (e) => {
+    const v = e && Array.isArray(e.values) ? e.values : [];
+    for (let i = v.length - 1; i >= 0; i--) if (String(v[i] ?? '').trim() !== '') return i;
+    return -1;
+  };
+  // Gibt es Werte an Positionen ohne Messfeld (z. B. aus einem Backup mit mehr Feldern),
+  // werden passende Felder angelegt, damit nichts unsichtbar wird. Liefert true bei Änderung.
+  function ensureFieldsForData(s, entries) {
+    let need = 0;
+    for (const e of entries || []) need = Math.max(need, lastFilled(e) + 1);
+    let changed = false;
+    while (s.fields.length < need) { s.fields.push({ name: 'Messwert ' + (s.fields.length + 1), unit: '' }); changed = true; }
+    return changed;
+  }
   async function persistData() { store.set(DATA_KEY, await C.encryptJSON(db, dataKey)); }
   // Speichert; schlägt das fehl (z. B. Speicher voll), wird der Stand im Speicher auf
   // "before" zurückgesetzt, damit die Anzeige nicht etwas zeigt, das gar nicht gesichert ist.
@@ -173,10 +453,13 @@
     const box = store.get(DATA_KEY);
     db = box ? await C.decryptJSON(box, dataKey) : { entries: [] };
     if (!Array.isArray(db.entries)) db.entries = [];
+    if (ensureFieldsForData(meta.settings, db.entries)) persistMeta();
   }
 
   function lock() {
     dataKey = null; db = null; editing = null; search = '';
+    filter = { from: '', to: '' }; selCustomer = null; calDay = null;
+    autoTry = false; // nach dem Sperren (von Hand oder automatisch) fragt Face ID nicht von selbst
     view = 'lock';
     render();
   }
@@ -184,6 +467,8 @@
 
   function afterUnlock() {
     view = 'list'; search = ''; lastActivity = Date.now();
+    const now = new Date();
+    cal = { y: now.getFullYear(), m: now.getMonth() }; calDay = todayStr();
     render();
   }
 
@@ -207,6 +492,12 @@
       hiddenAt = null;
       lastActivity = Date.now();
     }
+  });
+  // Zurück in der App und gesperrt: Face ID wieder automatisch anbieten
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden || dataKey || view !== 'lock') return;
+    autoTry = true;
+    setTimeout(maybeAutoPasskey, 400);
   });
 
   /* ------------------------------------------------------------------ */
@@ -312,18 +603,21 @@
   };
   // Schutz vor Formel-Injection in Excel/Numbers
   const safeText = (v) => { v = String(v ?? ''); return /^[=+\-@\t\r]/.test(v) ? "'" + v : v; };
+  // Reine Zahlen (auch negativ, mit Komma oder Punkt) bleiben unverändert, alles andere wie Text
   const safeNum = (v) => {
     v = String(v ?? '');
-    return /^[=+@\t\r]/.test(v) || /^-(?![\d.,])/.test(v) ? "'" + v : v;
+    return /^-?\d+([.,]\d+)?$/.test(v.trim()) ? v : safeText(v);
   };
 
   function buildCsv() {
     const f = meta.settings.fields;
-    const head = ['Datum', 'Kunde', 'Kunden-ID', 'Seriennummer', 'Fahrzeit (h:mm)', 'Arbeitszeit (h:mm)']
-      .concat(f.map((x) => x.name + (x.unit ? ` [${x.unit}]` : '')), ['Notiz']);
+    const totals = dayTotals();
+    const head = ['Datum', 'Kunde', 'Kunden-ID', 'Seriennummer', 'Art des Einsatzes', 'Anfahrt (h:mm)', 'Abfahrt (h:mm)', 'Fahrzeit gesamt (h:mm)', 'Arbeitszeit (h:mm)', 'Spesentag']
+      .concat(f.map((x) => safeText(x.name + (x.unit ? ` [${x.unit}]` : ''))), ['Notiz']);
     const rows = sortedEntries().map((e) => [
-      e.date, safeText(e.customerName), safeText(e.customerId), safeText(e.serial),
-      fmtDur(e.driveMin), fmtDur(e.workMin),
+      e.date, safeText(e.customerName), safeText(e.customerId), safeText(e.serial), kindLabel(e.kind),
+      e.driveToMin === undefined ? '' : fmtDur(e.driveToMin), e.driveBackMin === undefined ? '' : fmtDur(e.driveBackMin),
+      fmtDur(e.driveMin), fmtDur(e.workMin), isSpesen(totals.get(e.date) || 0) ? 'ja' : '',
       ...f.map((_, i) => safeNum((e.values || [])[i])),
       safeText(e.note),
     ]);
@@ -340,7 +634,8 @@
     const backup = {
       format: 'messprotokoll-backup', v: 1, app: 'Work Companion Fieldbook', appVersion: APP_VERSION, // Formatname bleibt für alte Backups
       created: new Date().toISOString(),
-      pw: meta.pw, settings: meta.settings, data: await C.encryptJSON(db, dataKey),
+      pw: meta.pw, rc: meta.rc || null, sq: meta.sq || null,
+      settings: meta.settings, data: await C.encryptJSON(db, dataKey),
     };
     const blob = new Blob([JSON.stringify(backup)], { type: 'application/json' });
     const done = await deliver(`fieldbook-backup-${todayStr()}.json`, blob);
@@ -376,16 +671,20 @@
         })));
   }
 
-  async function openBackup(file, password) {
+  async function parseBackup(file) {
     let b;
     try { b = JSON.parse(await file.text()); } catch { throw new Error('Die Datei ist kein gültiges Backup.'); }
     if (!b || b.format !== 'messprotokoll-backup' || !b.pw || !b.data) throw new Error('Die Datei ist kein Backup dieser App.');
-    let key;
-    try { key = await C.unwrapWithPassword(b.pw, password); } catch { throw new Error('Falsches Passwort für dieses Backup.'); }
+    return b;
+  }
+
+  // Öffnet ein Backup mit Passwort, Wiederherstellungscode oder Antworten (s, siehe askSecret)
+  async function openBackupWith(b, s) {
+    const key = await unwrapBySecret(b, s);
     let d;
     try { d = await C.decryptJSON(b.data, key); } catch { throw new Error('Backup beschädigt (lässt sich nicht entschlüsseln).'); }
     if (!d || !Array.isArray(d.entries)) throw new Error('Backup beschädigt.');
-    return { b, key, d };
+    return { b, key, d, s };
   }
 
   // Öffnet ein Backup mit dem aktuellen Datenschlüssel (ohne Passwort). null, wenn das nicht passt.
@@ -430,24 +729,35 @@
       // lassen sich alle Backups dieser Installation ohne das damalige Passwort öffnen.
       let d = await openWithCurrentKey(file);
       if (!d) {
-        const pw = await askPassword('Passwort des Backups', { text: 'Dieses Backup stammt von einer anderen Einrichtung der App. Bitte das Passwort eingeben, das beim Erstellen des Backups galt.', ok: 'Hinzufügen' });
-        if (!pw) return;
-        ({ d } = await openBackup(file, pw));
+        const b = await parseBackup(file);
+        const r = await askSecret({
+          title: 'Passwort des Backups', ok: 'Hinzufügen', rc: !!b.rc, sq: b.sq,
+          text: 'Dieses Backup stammt von einer anderen Einrichtung der App. Bitte das Passwort eingeben, das beim Erstellen des Backups galt.' +
+            (b.rc || b.sq ? ' Alternativ geht der Wiederherstellungscode oder die Antworten auf die Sicherheitsfragen.' : ''),
+          verify: (s) => openBackupWith(b, s),
+        });
+        if (!r) return;
+        d = r.d;
       }
       if (!db) return; // inzwischen gesperrt
       const before = db.entries.slice();
       const next = db.entries.map((e) => Object.assign({}, e));
-      const byId = new Map(next.map((e) => [e.id, e]));
+      const idx = new Map(next.map((e, i) => [e.id, i]));
       let added = 0, updated = 0;
       for (const e of d.entries) {
         if (!e || !e.id) continue;
-        const cur = byId.get(e.id);
-        if (!cur) { next.push(e); byId.set(e.id, e); added++; } else if ((e.updatedAt || 0) > (cur.updatedAt || 0)) {
-          Object.assign(cur, e); updated++;
+        const i = idx.get(e.id);
+        if (i === undefined) { idx.set(e.id, next.length); next.push(e); added++; } else if ((e.updatedAt || 0) > (next[i].updatedAt || 0)) {
+          // Der neuere Eintrag ersetzt den alten ganz. Felder mischen ergab z. B. Anfahrt/Abfahrt,
+          // die nicht zur Gesamtfahrzeit passen (Eintrag aus 1.1 ohne Aufteilung).
+          next[i] = e; updated++;
         }
       }
       db.entries = next;
-      if (await save(before)) toast(`${added} neu, ${updated} aktualisiert.`);
+      if (await save(before)) {
+        if (ensureFieldsForData(meta.settings, db.entries)) persistMeta();
+        toast(`${added} neu, ${updated} aktualisiert.`);
+      }
       render();
     } catch (e) { toast(e.message || String(e)); }
   }
@@ -467,16 +777,42 @@
     if (choice !== 'add') return;
     const file = await pickFile(); // direkt nach dem Fingertipp, sonst blockiert iOS den Dateidialog
     if (!file) return;
-    const cur = await askPassword('Aktuelles Passwort', { text: 'Dein jetziges App-Passwort, damit die bestehenden Daten geöffnet werden können.', ok: 'Weiter' });
-    if (!cur) return;
-    try {
-      dataKey = await C.unwrapWithPassword(meta.pw, cur);
-    } catch { dataKey = null; if (errEl) errEl.textContent = 'Falsches Passwort.'; return; }
+    const key = await askSecret({
+      title: 'Aktuelles Passwort', ok: 'Weiter', rc: !!meta.rc, sq: meta.sq,
+      text: 'Dein jetziges App-Passwort, damit die bestehenden Daten geöffnet werden können.',
+      verify: (s) => unwrapBySecret(meta, s),
+    });
+    if (!key) return;
+    dataKey = key;
     try { await loadDb(); } catch {
       dataKey = null; if (errEl) errEl.textContent = 'Bestehende Daten konnten nicht gelesen werden.'; return;
     }
     afterUnlock();
     await mergeBackup(file);
+  }
+
+  // Nach "Alles ersetzen" gelten Code und Sicherheitsfragen aus dem Backup, nicht die zuletzt
+  // auf dem Gerät eingerichteten. Das muss man wissen, sonst verlässt man sich auf einen Code,
+  // der nicht mehr funktioniert.
+  async function recoveryAfterRestore(b) {
+    const when = b.created ? new Date(b.created).toLocaleDateString('de-DE') : 'dem Tag des Backups';
+    const what = b.rc && b.sq ? 'der Wiederherstellungscode und die Sicherheitsfragen'
+      : b.rc ? 'der Wiederherstellungscode' : b.sq ? 'die Sicherheitsfragen' : null;
+    const text = (what
+      ? `Ab jetzt gelten ${what} vom ${when} (aus dem Backup). Ein Code oder Antworten, die du danach eingerichtet hast, funktionieren nicht mehr.`
+      : 'Im Backup war kein Wiederherstellungscode und keine Sicherheitsfrage eingerichtet. Der bisherige Code und die bisherigen Antworten funktionieren nicht mehr.') +
+      ' Am sichersten: jetzt einen neuen Code erzeugen und den alten Zettel vernichten.';
+    const ok = await modal((box, close) => {
+      box.append(
+        h('h3', { text: 'Wiederherstellungscode prüfen' }),
+        h('p', { text }),
+        h('div', { class: 'stack' },
+          h('button', { class: 'btn', type: 'button', onclick: () => close(true), text: 'Neuen Code erzeugen' }),
+          h('button', { class: 'btn link', type: 'button', onclick: () => close(null), text: 'Später' })));
+    });
+    if (ok && dataKey) {
+      try { if (await createRecoveryCode()) { toast('Wiederherstellungscode eingerichtet.'); render(); } } catch (e) { toast(e.message || String(e)); }
+    }
   }
 
   async function restoreFromBackup(errEl) {
@@ -486,19 +822,38 @@
       const ok = await confirmDlg('Daten ersetzen?', 'Alle Daten auf diesem Gerät werden durch das Backup ersetzt.', 'Ersetzen', true);
       if (!ok) return;
     }
-    const pw = await askPassword('Passwort des Backups', { ok: 'Wiederherstellen' });
-    if (!pw) return;
     try {
-      const { b, key, d } = await openBackup(file, pw);
+      const b0 = await parseBackup(file);
+      const r = await askSecret({
+        title: 'Passwort des Backups', ok: 'Wiederherstellen', rc: !!b0.rc, sq: b0.sq,
+        verify: (s) => openBackupWith(b0, s),
+      });
+      if (!r) return;
+      const { b, key, d } = r;
+      // Unbrauchbare Einträge (z. B. aus einer beschädigten Datei) nicht übernehmen
+      if (!Array.isArray(d.entries)) d.entries = [];
+      d.entries = d.entries.filter((e) => e && typeof e === 'object' && !Array.isArray(e));
+      // Wurde das Backup mit Code oder Antworten geöffnet, braucht die App ein neues Passwort
+      let pwWrap = b.pw;
+      if (r.s.kind !== 'pw') {
+        const np = await askPassword('Neues Passwort festlegen', {
+          confirm: true, ok: 'Speichern',
+          text: 'Das Backup ließ sich öffnen. Lege jetzt ein neues Passwort für diese App fest.',
+        });
+        if (!np) return;
+        pwWrap = await C.wrapWithPassword(key, np);
+      }
       const hadPasskey = !!(meta && meta.pk);
+      const same = (a, b2) => JSON.stringify(a || null) === JSON.stringify(b2 || null);
+      const recoveryChanged = !!(meta && (meta.rc || meta.sq) && (!same(meta.rc, b.rc) || !same(meta.sq, b.sq)));
       const settings = Object.assign(defaultSettings(), b.settings || {});
-      if (!Array.isArray(settings.fields)) settings.fields = defaultSettings().fields;
-      while (settings.fields.length < 10) settings.fields.push({ name: 'Messwert ' + (settings.fields.length + 1), unit: '' });
+      fixFields(settings);
+      ensureFieldsForData(settings, d.entries);
       // Beide Teile (Schlüssel-Infos und Daten) müssen zusammenpassen. Klappt das Schreiben nicht
       // (z. B. Speicher voll), wird der alte Stand zurückgeschrieben, damit nichts unlesbar wird.
       const oldMeta = localStorage.getItem(META_KEY);
       const oldData = localStorage.getItem(DATA_KEY);
-      const newMeta = { v: 1, pw: b.pw, pk: null, settings };
+      const newMeta = { v: 1, pw: pwWrap, rc: b.rc || null, sq: b.sq || null, pk: null, settings };
       try {
         localStorage.setItem(DATA_KEY, JSON.stringify(await C.encryptJSON(d, key)));
         localStorage.setItem(META_KEY, JSON.stringify(newMeta));
@@ -514,7 +869,9 @@
       afterUnlock();
       toast(hadPasskey
         ? 'Backup wiederhergestellt. Face ID bitte in den Einstellungen neu einrichten.'
-        : 'Backup wiederhergestellt. Passwort ist jetzt das des Backups.');
+        : r.s.kind === 'pw' ? 'Backup wiederhergestellt. Passwort ist jetzt das des Backups.'
+          : 'Backup wiederhergestellt. Es gilt dein neues Passwort.');
+      if (recoveryChanged) await recoveryAfterRestore(b);
     } catch (e) {
       if (errEl) errEl.textContent = e.message || String(e);
       else toast(e.message || String(e));
@@ -529,7 +886,7 @@
 
   const newEntry = () => ({
     id: uid(), date: todayStr(), customerName: '', customerId: '', serial: '',
-    driveMin: 0, workMin: 0, values: Array(10).fill(''), note: '',
+    kind: '', driveToMin: 0, driveBackMin: 0, driveMin: 0, workMin: 0, values: [], note: '',
     createdAt: Date.now(), updatedAt: Date.now(),
   });
 
@@ -539,7 +896,10 @@
   function render() {
     root.replaceChildren();
     document.querySelectorAll('.overlay').forEach((o) => o.remove());
-    const fn = { setup: renderSetup, lock: renderLock, list: renderList, edit: renderEdit, settings: renderSettings }[view];
+    const fn = {
+      setup: renderSetup, lock: renderLock, list: renderList, edit: renderEdit, settings: renderSettings,
+      customers: renderCustomers, customer: renderCustomer, calendar: renderCalendar,
+    }[view];
     (fn || renderLock)();
   }
 
@@ -573,6 +933,11 @@
         if (want) {
           try { await enablePasskey(); toast('Passkey eingerichtet.'); } catch (e) { toast(e.message || String(e)); }
         }
+        const wantCode = await confirmDlg('Wiederherstellungscode erzeugen?',
+          'Falls du Passwort und Face ID einmal verlierst, kommst du mit diesem Code wieder an deine Daten. Empfohlen: jetzt erzeugen und ausdrucken oder abschreiben. Du kannst es auch später in den Einstellungen tun.', 'Jetzt erzeugen');
+        if (wantCode) {
+          try { if (await createRecoveryCode()) { toast('Wiederherstellungscode eingerichtet.'); render(); } } catch (e) { toast(e.message || String(e)); }
+        }
       } catch (e) {
         err.textContent = 'Fehler: ' + (e.message || e);
         btn.disabled = false; btn.textContent = 'App einrichten';
@@ -587,7 +952,7 @@
       h('p', { class: 'muted', text: 'Lege ein Passwort fest. Alle Daten werden damit verschlüsselt und bleiben nur auf diesem Gerät.' }),
       h('div', { class: 'stack' }, p1, p2, btn),
       err,
-      h('div', { class: 'hint', text: 'Wichtig: Es gibt keine Passwort-Wiederherstellung. Wer das Passwort (und den Passkey) verliert, verliert die Daten. Erstelle deshalb regelmäßig ein verschlüsseltes Backup.' }),
+      h('div', { class: 'hint', text: 'Wichtig: Es gibt keinen Server und kein Konto, bei dem man das Passwort zurücksetzen könnte. Wer Passwort, Passkey und Wiederherstellungscode verliert, verliert die Daten. Nach dem Einrichten kannst du einen Wiederherstellungscode erzeugen. Erstelle außerdem regelmäßig ein verschlüsseltes Backup.' }),
       h('button', { class: 'btn link', type: 'button', onclick: () => restoreFromBackup(restoreErr), text: 'Aus Backup wiederherstellen' }),
       restoreErr,
       installHint(),
@@ -617,23 +982,82 @@
       h('h1', { text: 'Gesperrt' }),
       h('p', { class: 'muted', text: 'Entsperre die App, um deine Einträge zu sehen.' }),
     ];
+    lockUI = null;
     if (meta.pk) {
-      kids.push(h('button', {
+      const pkBtn = h('button', {
         class: 'btn', type: 'button', style: 'margin-bottom:12px', text: 'Mit Face ID / Passkey entsperren',
-        onclick: async (e) => {
-          const b = e.currentTarget; b.disabled = true; err.textContent = '';
-          try { await unlockWithPasskey(); afterUnlock(); } catch (ex) {
-            dataKey = null;
-            err.textContent = (ex && ex.name === 'NotAllowedError') ? 'Abgebrochen. Nutze das Passwort oder versuche es erneut.' : (ex.message || String(ex));
-          } finally { if (b.isConnected) b.disabled = false; }
-        },
-      }));
+        onclick: () => runPasskey(false),
+      });
+      // auto = true: von der App selbst gestartet. Lehnt iOS das ab (oft fehlt der Fingertipp), bleibt es still
+      // und der Button wartet.
+      async function runPasskey(auto) {
+        if (!pkBtn.isConnected || pkBtn.disabled) return;
+        pkBtn.disabled = true; err.textContent = '';
+        try { await unlockWithPasskey(); afterUnlock(); } catch (ex) {
+          dataKey = null;
+          if (ex && ex.name === 'NotAllowedError') err.textContent = auto ? '' : 'Abgebrochen. Nutze das Passwort oder versuche es erneut.';
+          else err.textContent = ex.message || String(ex);
+        } finally { if (pkBtn.isConnected) pkBtn.disabled = false; }
+      }
+      lockUI = { run: runPasskey };
+      kids.push(pkBtn);
     }
     kids.push(h('div', { class: 'stack' }, pw, meta.pk ? h('button', { class: 'btn sec', type: 'button', onclick: submit, text: 'Mit Passwort entsperren' }) : btn), err);
     // Ein Button genügt: bei Passkey-Variante den eigentlichen Button nicht doppelt anzeigen
-    kids.push(h('button', { class: 'btn link', type: 'button', onclick: () => restoreOrAdd(err), text: 'Backup einspielen' }));
+    kids.push(h('div', { class: 'linkrow' },
+      h('button', { class: 'btn link', type: 'button', onclick: () => forgotPassword(err), text: 'Passwort vergessen?' }),
+      h('button', { class: 'btn link', type: 'button', onclick: () => restoreOrAdd(err), text: 'Backup einspielen' })));
     kids.push(versionLine());
     root.append(h('div', { class: 'center' }, kids));
+    setTimeout(maybeAutoPasskey, 350);
+  }
+
+  // Face ID automatisch starten, wenn die App geöffnet wird (Einstellung, standardmäßig an)
+  function maybeAutoPasskey() {
+    if (!autoTry || view !== 'lock' || dataKey || !meta || !meta.pk || !lockUI) return;
+    if (meta.settings.autoPasskey === false || !window.PublicKeyCredential) return;
+    if (document.hidden || suspendLock || document.querySelector('.overlay')) return;
+    autoTry = false;
+    lockUI.run(true);
+  }
+
+  // Passwort vergessen: Öffnen mit Wiederherstellungscode oder Sicherheitsfragen, danach neues Passwort
+  async function forgotPassword(errEl) {
+    if (!meta.rc && !meta.sq) {
+      const wantBackup = await modal((box, close) => {
+        box.append(
+          h('h3', { text: 'Kein Wiederherstellungsweg eingerichtet' }),
+          h('p', { text: 'Ohne Passwort, Face ID oder Wiederherstellungscode lassen sich die Daten auf diesem Gerät nicht öffnen. Hast du ein Backup und kennst dessen Passwort, kannst du es einspielen.' }),
+          h('div', { class: 'stack' },
+            h('button', { class: 'btn', type: 'button', onclick: () => close(true), text: 'Backup einspielen' }),
+            h('button', { class: 'btn link', type: 'button', onclick: () => close(null), text: 'Schließen' })));
+      });
+      if (wantBackup) restoreOrAdd(errEl);
+      return;
+    }
+    const key = await askSecret({
+      title: 'Passwort vergessen', ok: 'Weiter', pw: false, rc: !!meta.rc, sq: meta.sq,
+      text: 'Öffne die App mit deinem Wiederherstellungscode oder den Antworten auf deine Sicherheitsfragen. Danach legst du ein neues Passwort fest. Deine Daten bleiben erhalten.',
+      verify: (s) => unwrapBySecret(meta, s),
+    });
+    if (!key) return;
+    const pw = await askPassword('Neues Passwort festlegen', {
+      confirm: true, ok: 'Speichern',
+      text: 'Das hat geklappt. Lege jetzt ein neues Passwort fest. Deine Daten bleiben erhalten.',
+    });
+    if (!pw) return;
+    try {
+      dataKey = key;
+      await loadDb();
+      meta.pw = await C.wrapWithPassword(key, pw);
+      persistMeta();
+    } catch (e) {
+      dataKey = null; db = null;
+      if (errEl) errEl.textContent = 'Das hat nicht geklappt: ' + (e.message || e);
+      return;
+    }
+    afterUnlock();
+    toast('Neues Passwort gespeichert.');
   }
 
   function versionLine() {
@@ -644,24 +1068,105 @@
     return h('div', { class: 'bar' }, left, h('h1', { text: title }), right);
   }
 
+  /* ------------------------------------------------------------------ */
+  /* Reiterleiste, Datumsfilter, Kunden, Kalender                        */
+  /* ------------------------------------------------------------------ */
+  const TABS = [
+    ['list', 'Einträge', 'list'], ['customers', 'Kunden', 'users'],
+    ['calendar', 'Kalender', 'cal'], ['settings', 'Einstellungen', 'settings'],
+  ];
+  const tabOf = (v) => (v === 'customer' ? 'customers' : v);
+
+  function tabbar() {
+    const cur = tabOf(view);
+    return h('nav', { class: 'tabs', 'aria-label': 'Hauptmenü' }, TABS.map(([v, label, ic]) => h('button', {
+      class: 'tab', type: 'button', 'aria-current': v === cur ? 'page' : null,
+      onclick: () => { if (v === 'customers') selCustomer = null; go(v); },
+    }, icon(ic), h('span', { text: label }))));
+  }
+
+  const lockBtn = () => iconBtn('lock', 'Sperren', lock);
+
+  // Gesamtzeit (Fahrt + Arbeit) pro Datum über alle Einträge: Grundlage für Spesen und Kalender
+  function dayTotals() {
+    const m = new Map();
+    for (const e of db.entries) m.set(e.date, (m.get(e.date) || 0) + (e.driveMin || 0) + (e.workMin || 0));
+    return m;
+  }
+  const spesenLimit = () => Number(meta.settings.spesenMin) || 0;
+  const isSpesen = (min) => spesenLimit() > 0 && min > spesenLimit();
+
+  function entryCard(e, backView, totals) {
+    const filled = (Array.isArray(e.values) ? e.values : []).filter((v) => v != null && String(v).trim() !== '').length;
+    return h('button', {
+      class: 'card', type: 'button',
+      onclick: () => { editing = { entry: JSON.parse(JSON.stringify(e)), isNew: false, back: backView }; go('edit'); },
+    },
+      h('div', { class: 'card-top' },
+        h('strong', { text: e.customerName || '(ohne Name)' }),
+        e.customerId && h('span', { class: 'tag', text: e.customerId })),
+      e.serial && h('div', { class: 'muted small', text: 'SN ' + e.serial }),
+      h('div', { class: 'chips' },
+        e.kind && h('span', { class: 'chip kind', text: kindLabel(e.kind) }),
+        h('span', { class: 'chip' }, 'Fahrt ', h('b', { text: fmtDur(e.driveMin) })),
+        h('span', { class: 'chip' }, 'Arbeit ', h('b', { text: fmtDur(e.workMin) })),
+        filled > 0 && h('span', { class: 'chip' }, 'Messwerte ', h('b', { text: String(filled) })),
+        isSpesen(totals.get(e.date) || 0) && h('span', { class: 'chip warn', text: 'Spesen' })));
+  }
+
+  const pad2 = (n) => String(n).padStart(2, '0');
+  const isoDate = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+  const fmtDate = (iso) => { const p = String(iso || '').split('-'); return p.length === 3 ? `${p[2]}.${p[1]}.${p[0]}` : (iso || ''); };
+  const MONTHS = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'];
+
+  function quickRange(kind) {
+    const now = new Date();
+    if (kind === 'week') {
+      const mon = new Date(now.getFullYear(), now.getMonth(), now.getDate() - ((now.getDay() + 6) % 7));
+      return { from: isoDate(mon), to: isoDate(new Date(mon.getFullYear(), mon.getMonth(), mon.getDate() + 6)) };
+    }
+    if (kind === 'month') {
+      return { from: isoDate(new Date(now.getFullYear(), now.getMonth(), 1)), to: isoDate(new Date(now.getFullYear(), now.getMonth() + 1, 0)) };
+    }
+    if (kind === 'last') {
+      return { from: isoDate(new Date(now.getFullYear(), now.getMonth() - 1, 1)), to: isoDate(new Date(now.getFullYear(), now.getMonth(), 0)) };
+    }
+    return { from: '', to: '' };
+  }
+
   function renderList() {
     const bodyEl = h('div');
     const sumEl = h('div', { class: 'summary' });
+    const chipsEl = h('div', { class: 'qchips' });
     const input = h('input', {
-      type: 'search', class: 'search', placeholder: 'Suchen: Kunde, ID, Seriennummer …', value: search,
+      type: 'search', class: 'search', placeholder: 'Suchen: Kunde, ID, Seriennummer, Art …', value: search,
       autocomplete: 'off', oninput: (e) => { search = e.target.value; fill(); },
     });
+    const from = h('input', { type: 'date', value: filter.from, 'aria-label': 'Von' });
+    const to = h('input', { type: 'date', value: filter.to, 'aria-label': 'Bis' });
+    const setRange = (r) => { filter = { from: r.from, to: r.to }; from.value = filter.from; to.value = filter.to; fill(); };
+    from.addEventListener('change', () => { filter.from = from.value; fill(); });
+    to.addEventListener('change', () => { filter.to = to.value; fill(); });
 
     function fill() {
+      const totals = dayTotals();
       const q = search.trim().toLowerCase();
-      const list = sortedEntries().filter((e) => !q ||
-        [e.customerName, e.customerId, e.serial, e.note].some((x) => String(x || '').toLowerCase().includes(q)));
+      const list = sortedEntries().filter((e) =>
+        (!filter.from || (e.date || '') >= filter.from) && (!filter.to || (e.date || '') <= filter.to) &&
+        (!q || [e.customerName, e.customerId, e.serial, e.note, kindLabel(e.kind)].some((x) => String(x || '').toLowerCase().includes(q))));
       const drive = list.reduce((s, e) => s + (e.driveMin || 0), 0);
       const work = list.reduce((s, e) => s + (e.workMin || 0), 0);
+      const ranged = filter.from || filter.to;
       sumEl.replaceChildren(
+        ranged && h('span', { class: 'rangetag', text: `${filter.from ? fmtDate(filter.from) : 'Anfang'} – ${filter.to ? fmtDate(filter.to) : 'heute und später'}` }),
         h('span', { text: `${list.length} Einträge` }), '·',
         h('span', { text: `Fahrt ${fmtDur(drive)} h` }), '·',
         h('span', { text: `Arbeit ${fmtDur(work)} h` }));
+      chipsEl.replaceChildren(...[['', 'Alle'], ['week', 'Woche'], ['month', 'Monat'], ['last', 'Vormonat']].map(([k, label]) => {
+        const r = quickRange(k);
+        const on = r.from === filter.from && r.to === filter.to;
+        return h('button', { class: 'qchip', type: 'button', 'aria-pressed': on ? 'true' : 'false', text: label, onclick: () => setRange(r) });
+      }));
       bodyEl.replaceChildren();
       if (!list.length) {
         bodyEl.append(h('div', { class: 'empty', text: db.entries.length ? 'Keine Treffer.' : 'Noch keine Einträge. Tippe unten auf „Neu“.' }));
@@ -670,37 +1175,239 @@
       let day = null;
       for (const e of list) {
         if (e.date !== day) { day = e.date; bodyEl.append(h('div', { class: 'day', text: fmtDay(day) })); }
-        const filled = (e.values || []).filter((v) => String(v).trim() !== '').length;
-        bodyEl.append(h('button', {
-          class: 'card', type: 'button',
-          onclick: () => { editing = { entry: JSON.parse(JSON.stringify(e)), isNew: false }; go('edit'); },
-        },
-          h('div', { class: 'card-top' },
-            h('strong', { text: e.customerName || '(ohne Name)' }),
-            e.customerId && h('span', { class: 'tag', text: e.customerId })),
-          e.serial && h('div', { class: 'muted small', text: 'SN ' + e.serial }),
-          h('div', { class: 'chips' },
-            h('span', { class: 'chip' }, 'Fahrt ', h('b', { text: fmtDur(e.driveMin) })),
-            h('span', { class: 'chip' }, 'Arbeit ', h('b', { text: fmtDur(e.workMin) })),
-            filled > 0 && h('span', { class: 'chip' }, 'Messwerte ', h('b', { text: `${filled}/10` })))));
+        bodyEl.append(entryCard(e, 'list', totals));
       }
     }
 
     root.append(
-      header('Fieldbook', null, h('div', { style: 'display:flex' },
-        iconBtn('settings', 'Einstellungen', () => go('settings')),
-        iconBtn('lock', 'Sperren', lock))),
-      h('main', { class: 'wrap' }, backupBanner(), input, sumEl, bodyEl),
+      header('Fieldbook', null, lockBtn()),
+      h('main', { class: 'wrap' }, backupBanner(), input,
+        h('div', { class: 'datefilter' },
+          h('label', {}, h('span', { text: 'Von' }), from),
+          h('label', {}, h('span', { text: 'Bis' }), to)),
+        chipsEl, sumEl, bodyEl),
       h('button', {
         class: 'fab', type: 'button', 'aria-label': 'Neuer Eintrag',
-        onclick: () => { editing = { entry: newEntry(), isNew: true }; go('edit'); },
-      }, icon('plus'), 'Neu'));
+        onclick: () => { editing = { entry: newEntry(), isNew: true, back: 'list' }; go('edit'); },
+      }, icon('plus'), 'Neu'),
+      tabbar());
     fill();
   }
 
-  function durationField(label, minutes) {
+  /* ---- Kunden ---- */
+  // Kunden entstehen aus den Einträgen. Zusammengehörig sind gleiche Kunden-IDs; Einträge ohne ID
+  // werden über den Namen einem Kunden mit ID zugeordnet, falls es den Namen dort gibt.
+  function customerGroups() {
+    const nameToId = new Map();
+    const entries = sortedEntries(); // neueste zuerst
+    for (const e of entries) {
+      const n = (e.customerName || '').trim().toLowerCase();
+      if (n && e.customerId && !nameToId.has(n)) nameToId.set(n, e.customerId);
+    }
+    const groups = new Map();
+    for (const e of entries) {
+      const n = (e.customerName || '').trim().toLowerCase();
+      const id = e.customerId || nameToId.get(n) || '';
+      const key = id ? 'id:' + id.toLowerCase() : 'n:' + n;
+      let g = groups.get(key);
+      if (!g) { g = { key, name: e.customerName || '(ohne Name)', id, entries: [], drive: 0, work: 0 }; groups.set(key, g); }
+      g.entries.push(e);
+      g.drive += e.driveMin || 0; g.work += e.workMin || 0;
+    }
+    for (const g of groups.values()) g.last = g.entries[0].date; // Einträge sind nach Datum absteigend
+    return [...groups.values()];
+  }
+
+  function renderCustomers() {
+    const bodyEl = h('div');
+    const input = h('input', {
+      type: 'search', class: 'search', placeholder: 'Kunde oder Kunden-ID suchen …', value: search,
+      autocomplete: 'off', oninput: (e) => { search = e.target.value; fill(); },
+    });
+    function fill() {
+      const q = search.trim().toLowerCase();
+      const list = customerGroups()
+        .filter((g) => !q || g.name.toLowerCase().includes(q) || g.id.toLowerCase().includes(q))
+        .sort((a, b) => a.name.localeCompare(b.name, 'de'));
+      bodyEl.replaceChildren();
+      if (!list.length) {
+        bodyEl.append(h('div', { class: 'empty', text: db.entries.length ? 'Keine Treffer.' : 'Noch keine Kunden. Sie entstehen automatisch aus deinen Einträgen.' }));
+        return;
+      }
+      for (const g of list) {
+        bodyEl.append(h('button', { class: 'card', type: 'button', onclick: () => { selCustomer = g.key; go('customer'); } },
+          h('div', { class: 'card-top' },
+            h('strong', { text: g.name }),
+            g.id && h('span', { class: 'tag', text: g.id })),
+          h('div', { class: 'chips' },
+            h('span', { class: 'chip' }, h('b', { text: String(g.entries.length) }), g.entries.length === 1 ? ' Einsatz' : ' Einsätze'),
+            h('span', { class: 'chip' }, 'zuletzt ', h('b', { text: fmtDate(g.last) })),
+            h('span', { class: 'chip' }, 'Fahrt ', h('b', { text: fmtDur(g.drive) })),
+            h('span', { class: 'chip' }, 'Arbeit ', h('b', { text: fmtDur(g.work) })))));
+      }
+    }
+    root.append(
+      header('Kunden', null, lockBtn()),
+      h('main', { class: 'wrap' }, input, bodyEl),
+      tabbar());
+    fill();
+  }
+
+  const numVal = (s) => {
+    s = String(s ?? '').trim();
+    return /^-?\d+([.,]\d+)?$/.test(s) ? parseFloat(s.replace(',', '.')) : null;
+  };
+
+  // Kleiner Verlauf als Linie. Es werden nur Zahlen in den SVG-Text eingesetzt.
+  function sparkline(points) {
+    const W = 300, H = 90, P = 10;
+    const ys = points.map((p) => p.y);
+    const min = Math.min(...ys), max = Math.max(...ys), span = max - min || 1;
+    const X = (i) => (points.length === 1 ? W / 2 : P + (i * (W - 2 * P)) / (points.length - 1));
+    const Y = (v) => H - P - ((v - min) / span) * (H - 2 * P);
+    const line = points.length > 1
+      ? `<polyline points="${points.map((p, i) => `${X(i).toFixed(1)},${Y(p.y).toFixed(1)}`).join(' ')}" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>` : '';
+    const dots = points.map((p, i) => `<circle cx="${X(i).toFixed(1)}" cy="${Y(p.y).toFixed(1)}" r="3.5" fill="currentColor"/>`).join('');
+    const wrapEl = h('div', { class: 'spark' });
+    wrapEl.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Verlauf des Messwerts">${line}${dots}</svg>`;
+    return wrapEl;
+  }
+
+  function renderCustomer() {
+    const g = customerGroups().find((x) => x.key === selCustomer);
+    if (!g) { selCustomer = null; view = 'customers'; renderCustomers(); return; }
+    const totals = dayTotals();
+    const fields = meta.settings.fields;
+    // nur Messwerte anbieten, zu denen dieser Kunde Einträge hat
+    const usable = fields.map((f, i) => ({ f, i, n: g.entries.filter((e) => String((e.values || [])[i] ?? '').trim() !== '').length })).filter((x) => x.n > 0);
+    const histEl = h('div');
+    function drawHist(idx) {
+      histEl.replaceChildren();
+      const rows = g.entries.filter((e) => String((e.values || [])[idx] ?? '').trim() !== '').slice().reverse(); // älteste zuerst
+      const f = fields[idx];
+      const unit = f.unit ? ' ' + f.unit : '';
+      const nums = rows.map((e) => ({ x: e.date, y: numVal(e.values[idx]) })).filter((p) => p.y !== null);
+      if (nums.length >= 1) histEl.append(sparkline(nums));
+      if (nums.length >= 2) {
+        const ys = nums.map((p) => p.y);
+        histEl.append(h('div', { class: 'muted small', text: `min ${Math.min(...ys)}${unit} · max ${Math.max(...ys)}${unit} · ${nums.length} Werte` }));
+      }
+      histEl.append(h('div', { class: 'hist' }, rows.slice().reverse().map((e) => h('div', { class: 'histrow' },
+        h('span', { text: fmtDate(e.date) }), h('b', { text: String(e.values[idx]).trim() + unit })))));
+    }
+    const sel = usable.length ? h('select', {
+      'aria-label': 'Messwert wählen',
+      onchange: (e) => drawHist(Number(e.target.value)),
+    }, usable.map((x) => h('option', { value: String(x.i), text: `${x.f.name || 'Messwert ' + (x.i + 1)} (${x.n})` }))) : null;
+
+    root.append(
+      header(g.name, h('button', { class: 'ibtn', type: 'button', 'aria-label': 'Zurück', onclick: () => { selCustomer = null; go('customers'); } }, icon('back')), lockBtn()),
+      h('main', { class: 'wrap' },
+        h('div', { class: 'sect' },
+          h('div', { class: 'kv' }, h('span', { text: 'Kunden-ID' }), h('b', { text: g.id || '–' })),
+          h('div', { class: 'kv' }, h('span', { text: 'Einsätze' }), h('b', { text: String(g.entries.length) })),
+          h('div', { class: 'kv' }, h('span', { text: 'Letzter Besuch' }), h('b', { text: fmtDate(g.last) })),
+          h('div', { class: 'kv' }, h('span', { text: 'Fahrzeit gesamt' }), h('b', { text: fmtDur(g.drive) + ' h' })),
+          h('div', { class: 'kv' }, h('span', { text: 'Arbeitszeit gesamt' }), h('b', { text: fmtDur(g.work) + ' h' }))),
+        h('button', {
+          class: 'btn', type: 'button', style: 'margin-bottom:18px', text: 'Neuer Eintrag für diesen Kunden',
+          onclick: () => {
+            const e = newEntry();
+            e.customerName = g.entries[0].customerName || ''; e.customerId = g.id;
+            editing = { entry: e, isNew: true, back: 'customer' }; go('edit');
+          },
+        }),
+        usable.length ? h('div', { class: 'sect' }, h('h2', { text: 'Verlauf eines Messwerts' }), sel, histEl) : null,
+        h('div', { class: 'day', text: 'Alle Einträge' }),
+        g.entries.map((e) => entryCard(e, 'customer', totals))),
+      tabbar());
+    if (usable.length) drawHist(usable[0].i);
+  }
+
+  /* ---- Kalender ---- */
+  const WEEKDAYS = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
+
+  function renderCalendar() {
+    const totals = dayTotals();
+    const statEl = h('div', { class: 'calstat' });
+    const gridEl = h('div', { class: 'calgrid' });
+    const panelEl = h('div');
+    const titleEl = h('div', { class: 'calmonth' });
+
+    function paint() {
+      const { y, m } = cal;
+      titleEl.textContent = `${MONTHS[m]} ${y}`;
+      const offset = (new Date(y, m, 1).getDay() + 6) % 7;
+      const days = new Date(y, m + 1, 0).getDate();
+      let spDays = 0; let count = 0; let drive = 0; let work = 0;
+      const prefix = `${y}-${pad2(m + 1)}-`;
+      for (const e of db.entries) {
+        if (!(e.date || '').startsWith(prefix)) continue;
+        count++; drive += e.driveMin || 0; work += e.workMin || 0;
+      }
+      gridEl.replaceChildren(...WEEKDAYS.map((d) => h('div', { class: 'calwd', text: d })));
+      for (let i = 0; i < offset; i++) gridEl.append(h('div'));
+      for (let d = 1; d <= days; d++) {
+        const iso = prefix + pad2(d);
+        const tot = totals.get(iso) || 0;
+        const sp = isSpesen(tot);
+        if (sp) spDays++;
+        gridEl.append(h('button', {
+          class: 'calday' + (tot > 0 ? ' has' : '') + (sp ? ' sp' : '') + (iso === todayStr() ? ' today' : '') + (iso === calDay ? ' sel' : ''),
+          type: 'button', 'aria-pressed': iso === calDay ? 'true' : 'false',
+          'aria-label': `${fmtDay(iso)}${tot > 0 ? ', ' + fmtDur(tot) + ' Stunden' : ''}${sp ? ', Spesen' : ''}`,
+          onclick: () => { calDay = iso; paint(); },
+        }, h('span', { class: 'dn', text: String(d) }), tot > 0 && h('span', { class: 'dt', text: fmtDur(tot) })));
+      }
+      statEl.replaceChildren(
+        spesenLimit() > 0
+          ? h('div', { class: 'spesenbox' }, h('b', { text: String(spDays) }), spDays === 1 ? ' Spesentag' : ' Spesentage',
+            h('span', { class: 'muted small', text: ` (mehr als ${String(spesenLimit() / 60).replace('.', ',')} Std. pro Tag)` }))
+          : h('div', { class: 'muted small', text: 'Spesen-Hinweis ist in den Einstellungen ausgeschaltet.' }),
+        h('div', { class: 'muted small', text: `${count} Einträge · Fahrt ${fmtDur(drive)} h · Arbeit ${fmtDur(work)} h` }));
+      // Tagesansicht
+      panelEl.replaceChildren();
+      if (!calDay) {
+        panelEl.append(h('div', { class: 'empty', style: 'padding:24px 12px', text: 'Tippe auf einen Tag, um die Einträge zu sehen.' }));
+        return;
+      }
+      const dayEntries = sortedEntries().filter((e) => e.date === calDay).reverse();
+      const tot = totals.get(calDay) || 0;
+      panelEl.append(
+        h('div', { class: 'day', text: fmtDay(calDay) }),
+        h('div', { class: 'daysum' },
+          h('span', { text: tot > 0 ? `Summe ${fmtDur(tot)} h` : 'Keine Einträge' }),
+          isSpesen(tot) && h('span', { class: 'chip warn', text: 'Spesen fällig' })),
+        ...dayEntries.map((e) => entryCard(e, 'calendar', totals)),
+        h('button', {
+          class: 'btn sec', type: 'button', text: 'Neuer Eintrag an diesem Tag',
+          onclick: () => { const e = newEntry(); e.date = calDay; editing = { entry: e, isNew: true, back: 'calendar' }; go('edit'); },
+        }));
+    }
+
+    const shift = (delta) => {
+      const d = new Date(cal.y, cal.m + delta, 1);
+      cal = { y: d.getFullYear(), m: d.getMonth() };
+      paint();
+    };
+    root.append(
+      header('Kalender', null, lockBtn()),
+      h('main', { class: 'wrap' },
+        h('div', { class: 'calnav' },
+          h('button', { class: 'ibtn', type: 'button', 'aria-label': 'Voriger Monat', onclick: () => shift(-1) }, icon('back')),
+          titleEl,
+          h('button', { class: 'ibtn', type: 'button', 'aria-label': 'Nächster Monat', onclick: () => shift(1) }, icon('next'))),
+        statEl, gridEl,
+        h('div', { class: 'muted small', style: 'margin:8px 2px 0', text: 'Farbig: Tage, an denen Fahrzeit plus Arbeitszeit über der Spesen-Grenze liegt. Die Grenze stellst du in den Einstellungen ein.' }),
+        panelEl),
+      tabbar());
+    paint();
+  }
+
+  function durationField(label, minutes, onInput) {
     const hh = h('input', { type: 'number', inputmode: 'numeric', min: '0', placeholder: '0', value: minutes ? Math.floor(minutes / 60) : '' });
     const mm = h('input', { type: 'number', inputmode: 'numeric', min: '0', placeholder: '0', value: minutes ? minutes % 60 : '' });
+    if (onInput) { hh.addEventListener('input', onInput); mm.addEventListener('input', onInput); }
     return {
       el: h('label', { class: 'f' }, h('span', { text: label }),
         h('div', { class: 'dur' }, hh, h('em', { text: 'Std' }), mm, h('em', { text: 'Min' }))),
@@ -713,8 +1420,35 @@
     return { input, el: h('label', { class: 'f' }, h('span', { text: label }), input) };
   }
 
+  const MAX_FIELDS = 50;
+  // leere Werte am Ende weglassen, damit "bis zum letzten ausgefüllten" stimmt
+  function trimValues(v) {
+    const out = v.slice();
+    while (out.length && out[out.length - 1] === '') out.pop();
+    return out;
+  }
+  function newFieldDlg(n) {
+    return modal((box, close) => {
+      const nm = h('input', { type: 'text', value: 'Messwert ' + n, maxlength: '40', 'aria-label': 'Name', autocapitalize: 'sentences' });
+      const un = h('input', { type: 'text', value: '', maxlength: '12', 'aria-label': 'Einheit', placeholder: 'z. B. bar' });
+      const ok = () => close({ name: nm.value.trim() || 'Messwert ' + n, unit: un.value.trim() });
+      const onEnter = (e) => { if (e.key === 'Enter') { e.preventDefault(); ok(); } };
+      nm.addEventListener('keydown', onEnter); un.addEventListener('keydown', onEnter);
+      box.append(
+        h('h3', { text: 'Neues Messfeld' }),
+        h('p', { class: 'muted small', text: 'Das Feld kommt in die Liste der Messfelder (Einstellungen) und steht danach in jedem Eintrag zur Verfügung.' }),
+        h('label', { class: 'f' }, h('span', { text: 'Name' }), nm),
+        h('label', { class: 'f' }, h('span', { text: 'Einheit (optional)' }), un),
+        h('div', { class: 'stack' },
+          h('button', { class: 'btn', type: 'button', onclick: ok, text: 'Anlegen' }),
+          h('button', { class: 'btn link', type: 'button', onclick: () => close(null), text: 'Abbrechen' })));
+      setTimeout(() => { nm.focus(); nm.select(); }, 50);
+    });
+  }
+
   function renderEdit() {
     const { entry, isNew } = editing;
+    const back = editing.back || 'list';
     const fields = meta.settings.fields;
     const names = [...new Set(db.entries.map((e) => e.customerName).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'de'));
     const dl = h('datalist', { id: 'customers' }, names.map((n) => h('option', { value: n })));
@@ -723,9 +1457,63 @@
     const name = textField('Kundenname', { value: entry.customerName, list: 'customers', autocapitalize: 'words', placeholder: 'z. B. Müller GmbH' });
     const cid = textField('Kunden-ID', { value: entry.customerId, autocapitalize: 'characters' });
     const serial = textField('Seriennummer Gerät', { value: entry.serial, autocapitalize: 'characters' });
-    const drive = durationField('Fahrzeit', entry.driveMin);
-    const work = durationField('Arbeitszeit', entry.workMin);
+    // Art des Einsatzes: Pflicht bei neuen Einträgen und bei Einträgen, die sie schon haben.
+    // Ältere Einträge ohne Angabe bleiben gültig und lassen sich beim Bearbeiten ergänzen.
+    const kindRequired = isNew || !!entry.kind;
+    const kindSel = h('select', { 'aria-label': 'Art des Einsatzes' },
+      h('option', { value: '', text: kindRequired ? 'Bitte wählen …' : '– nicht angegeben –' }),
+      KINDS.map(([v, t]) => h('option', { value: v, text: t, selected: entry.kind === v })));
+    const kindField = h('label', { class: 'f' }, h('span', { text: 'Art des Einsatzes' }), kindSel);
+    const dayHint = h('div', { class: 'dayhint' });
+    const others = new Map(); // Summe der anderen Einträge pro Datum (ohne diesen Eintrag)
+    for (const e of db.entries) {
+      if (e.id === entry.id) continue;
+      others.set(e.date, (others.get(e.date) || 0) + (e.driveMin || 0) + (e.workMin || 0));
+    }
+    function updateDayHint() {
+      driveSumVal.textContent = fmtDur(driveNow()) + ' h';
+      const total = (others.get(date.input.value) || 0) + driveNow() + work.get();
+      dayHint.replaceChildren();
+      dayHint.classList.toggle('warn', isSpesen(total));
+      if (!total) return;
+      dayHint.append(isSpesen(total)
+        ? h('span', { text: `Spesen fällig: Tagessumme ${fmtDur(total)} h (Fahrt + Arbeit aller Einträge dieses Tages)` })
+        : h('span', { text: `Tagessumme ${fmtDur(total)} h (Fahrt + Arbeit aller Einträge dieses Tages)` }));
+    }
+    // Fahrzeit besteht aus Anfahrt und Abfahrt. Ältere Einträge haben nur eine Gesamt-Fahrzeit; sie bleibt
+    // bestehen, solange Anfahrt und Abfahrt leer bleiben.
+    const legacyDrive = entry.driveToMin === undefined && entry.driveBackMin === undefined && (entry.driveMin || 0) > 0;
+    const driveTo = durationField('Anfahrt', entry.driveToMin || 0, () => updateDayHint());
+    const driveBack = durationField('Abfahrt', entry.driveBackMin || 0, () => updateDayHint());
+    const driveNow = () => { const t = driveTo.get() + driveBack.get(); return legacyDrive && t === 0 ? (entry.driveMin || 0) : t; };
+    const driveSumVal = h('div', { class: 'sumval' });
+    const legacyBox = legacyDrive ? h('div', { class: 'dayhint', style: 'margin:0 0 10px', text: `Bisher gespeicherte Fahrzeit: ${fmtDur(entry.driveMin)} h gesamt. Trage Anfahrt und Abfahrt ein, um sie aufzuteilen. Lässt du beide leer, bleibt der Gesamtwert bestehen.` }) : null;
+    const work = durationField('Arbeitszeit', entry.workMin, () => updateDayHint());
     const note = h('textarea', { placeholder: 'Optional', value: entry.note || '' });
+
+    // Vorlagentext: Wählt man die Art des Einsatzes, erscheint der passende Text in der Notiz, solange
+    // die Notiz leer oder noch der unveränderte Vorlagentext ist. Eigener Text wird nie überschrieben.
+    let lastKind = entry.kind || '';
+    let autoNote = null;
+    const tplOf = (k) => String(((meta.settings.templates || {})[k]) || '').trim();
+    kindSel.addEventListener('change', () => {
+      const k = kindSel.value;
+      const cur = note.value.trim();
+      const untouched = !cur || (lastKind && cur === tplOf(lastKind));
+      lastKind = k;
+      if (!untouched) return;
+      const tpl = tplOf(k);
+      note.value = tpl ? tpl + '\n\n' : '';
+      autoNote = tpl ? note.value : null;
+    });
+    note.addEventListener('input', () => { if (note.value !== autoNote) autoNote = null; });
+    // Beim Antippen springt der Cursor in die leere Zeile unter dem Vorlagentext
+    note.addEventListener('focus', () => {
+      if (autoNote && note.value === autoNote) setTimeout(() => { const L = note.value.length; note.setSelectionRange(L, L); }, 0);
+    });
+
+    date.input.addEventListener('change', updateDayHint);
+    date.input.addEventListener('input', updateDayHint);
 
     // Kunden-ID und Name gegenseitig ergänzen
     const sorted = sortedEntries();
@@ -738,51 +1526,100 @@
       if (m && !name.input.value.trim()) name.input.value = m.customerName;
     });
 
-    const measInputs = fields.map((f, i) => {
+    // Messwerte schrittweise: neuer Eintrag mit einem Feld, beim Bearbeiten alle bis zum
+    // letzten ausgefüllten. "Messwert hinzufügen" zeigt das nächste Feld aus den Einstellungen,
+    // sind alle gezeigt, wird ein neues Messfeld angelegt.
+    const measBox = h('div', { class: 'meas' });
+    const measInputs = [];
+    function addMeasInput(focus) {
+      const i = measInputs.length;
+      const f = fields[i];
       const inp = h('input', {
         type: 'text', inputmode: 'decimal', autocomplete: 'off', enterkeyhint: 'next',
-        value: (entry.values || [])[i] || '',
+        value: (entry.values || [])[i] ?? '',
       });
-      return { inp, el: h('label', { class: 'f' }, h('span', {}, f.name || 'Messwert ' + (i + 1), f.unit && h('span', { class: 'unit', text: ' [' + f.unit + ']' })), inp) };
+      const el = h('label', { class: 'f' }, h('span', {}, f.name || 'Messwert ' + (i + 1), f.unit && h('span', { class: 'unit', text: ' [' + f.unit + ']' })), inp);
+      measInputs.push({ inp, el });
+      measBox.append(el);
+      if (focus) inp.focus();
+    }
+    const addMeasBtn = h('button', { class: 'btn sec', type: 'button' });
+    function updateAddBtn() {
+      if (measInputs.length < fields.length) {
+        addMeasBtn.disabled = false;
+        addMeasBtn.textContent = '+ Messwert hinzufügen (' + (fields[measInputs.length].name || 'Messwert ' + (measInputs.length + 1)) + ')';
+      } else if (fields.length < MAX_FIELDS) {
+        addMeasBtn.disabled = false;
+        addMeasBtn.textContent = '+ Neues Messfeld anlegen';
+      } else {
+        addMeasBtn.disabled = true;
+        addMeasBtn.textContent = `Höchstens ${MAX_FIELDS} Messwerte`;
+      }
+    }
+    addMeasBtn.addEventListener('click', async () => {
+      if (measInputs.length >= fields.length) {
+        const nf = await newFieldDlg(fields.length + 1);
+        if (!nf) { addMeasBtn.focus(); return; }
+        if (!meta || view !== 'edit') return;
+        fields.push(nf); persistMeta();
+        toast('Messfeld angelegt. Es gilt ab jetzt für alle Einträge.');
+      }
+      addMeasInput(true);
+      updateAddBtn();
     });
+    const showMeas = isNew ? 1 : Math.max(1, lastFilled(entry) + 1);
+    for (let i = 0; i < Math.min(showMeas, fields.length); i++) addMeasInput(false);
+    updateAddBtn();
 
     const err = h('div', { class: 'err' });
+    updateDayHint();
     async function onSave() {
       if (!name.input.value.trim()) { err.textContent = 'Bitte einen Kundennamen eingeben.'; name.input.focus(); return; }
       if (!date.input.value) { err.textContent = 'Bitte ein Datum wählen.'; return; }
+      if (kindRequired && !kindSel.value) { err.textContent = 'Bitte die Art des Einsatzes wählen.'; kindSel.focus(); return; }
+      const to = driveTo.get(); const bk = driveBack.get();
+      const driveOut = legacyDrive && to + bk === 0 ? {} : { driveToMin: to, driveBackMin: bk, driveMin: to + bk };
       const out = Object.assign({}, entry, {
         date: date.input.value, customerName: name.input.value.trim(), customerId: cid.input.value.trim(),
-        serial: serial.input.value.trim(), driveMin: drive.get(), workMin: work.get(),
-        values: measInputs.map((m) => m.inp.value.trim()), note: note.value.trim(), updatedAt: Date.now(),
-      });
+        serial: serial.input.value.trim(), kind: kindSel.value, workMin: work.get(),
+        values: trimValues(measInputs.map((m) => m.inp.value.trim())), note: note.value.trim(), updatedAt: Date.now(),
+      }, driveOut);
       const before = db.entries.slice();
       const i = db.entries.findIndex((e) => e.id === out.id);
       if (i >= 0) db.entries[i] = out; else db.entries.push(out);
-      if (await save(before)) { editing = null; go('list'); toast('Gespeichert.'); }
+      if (await save(before)) {
+        editing = null;
+        if (back === 'calendar') { const p = out.date.split('-'); cal = { y: Number(p[0]), m: Number(p[1]) - 1 }; calDay = out.date; }
+        go(back); toast('Gespeichert.');
+      }
     }
     async function onDelete() {
       if (!await confirmDlg('Eintrag löschen?', 'Das kann nicht rückgängig gemacht werden.', 'Löschen', true)) return;
       if (!db) return; // inzwischen gesperrt
       const before = db.entries.slice();
       db.entries = db.entries.filter((e) => e.id !== entry.id);
-      if (await save(before)) { editing = null; go('list'); }
+      if (await save(before)) { editing = null; go(back); }
     }
     function onCopy() {
       const c = newEntry();
       Object.assign(c, { customerName: name.input.value.trim(), customerId: cid.input.value.trim(), serial: serial.input.value.trim() });
-      editing = { entry: c, isNew: true };
+      editing = { entry: c, isNew: true, back };
       go('edit');
       toast('Kopie mit Kundendaten angelegt.');
     }
 
     root.append(
       header(isNew ? 'Neuer Eintrag' : 'Eintrag bearbeiten',
-        h('button', { class: 'ibtn', type: 'button', 'aria-label': 'Zurück', onclick: () => { editing = null; go('list'); } }, icon('back')), null),
+        h('button', { class: 'ibtn', type: 'button', 'aria-label': 'Zurück', onclick: () => { editing = null; go(back); } }, icon('back')), null),
       h('main', { class: 'wrap' },
         dl,
-        h('div', { class: 'sect' }, h('h2', { text: 'Auftrag' }), date.el, name.el, h('div', { class: 'row' }, cid.el, serial.el)),
-        h('div', { class: 'sect' }, h('h2', { text: 'Zeiten' }), h('div', { class: 'row' }, drive.el, work.el)),
-        h('div', { class: 'sect' }, h('h2', { text: 'Messwerte' }), h('div', { class: 'meas' }, measInputs.map((m) => m.el))),
+        h('div', { class: 'sect' }, h('h2', { text: 'Auftrag' }), date.el, name.el, h('div', { class: 'row' }, cid.el, serial.el), kindField),
+        h('div', { class: 'sect' }, h('h2', { text: 'Zeiten' }),
+          legacyBox,
+          h('div', { class: 'row' }, driveTo.el, driveBack.el),
+          h('div', { class: 'row' }, work.el, h('div', { class: 'sumbox' }, h('span', { text: 'Fahrzeit gesamt' }), driveSumVal)),
+          dayHint),
+        h('div', { class: 'sect' }, h('h2', { text: 'Messwerte' }), measBox, addMeasBtn),
         h('div', { class: 'sect' }, h('h2', { text: 'Notiz' }), note),
         err,
         h('div', { class: 'footer-actions stack' },
@@ -805,6 +1642,12 @@
     }, [[0, 'Aus'], [1, 'Täglich'], [3, 'Alle 3 Tage'], [7, 'Wöchentlich'], [14, 'Alle 2 Wochen'], [30, 'Monatlich']]
       .map(([v, t]) => h('option', { value: String(v), text: t, selected: v === s.backupDays })));
 
+    const spesenSel = h('select', {
+      onchange: (e) => { s.spesenMin = Number(e.target.value); persistMeta(); toast('Gespeichert.'); },
+    }, [[0, 'Aus'], [240, 'mehr als 4 Stunden'], [300, 'mehr als 5 Stunden'], [360, 'mehr als 6 Stunden'], [420, 'mehr als 7 Stunden'],
+      [480, 'mehr als 8 Stunden'], [540, 'mehr als 9 Stunden'], [600, 'mehr als 10 Stunden'], [720, 'mehr als 12 Stunden']]
+      .map(([v, t]) => h('option', { value: String(v), text: t, selected: v === (Number(s.spesenMin) || 0) })));
+
     const pkRow = h('div', { class: 'setrow' },
       h('div', {}, h('div', { text: 'Face ID / Passkey' }),
         h('div', { class: 'muted small', text: meta.pk ? 'Aktiv. Das Passwort bleibt als Reserve.' : 'Nicht eingerichtet.' })),
@@ -823,6 +1666,61 @@
           },
         }));
 
+    const autoRow = meta.pk ? h('label', { class: 'setrow switchrow' },
+      h('div', {}, h('div', { text: 'Face ID automatisch starten' }),
+        h('div', { class: 'muted small', text: 'Beim Öffnen der App fragt Face ID sofort. Klappt das auf deinem iPhone nicht, einfach ausschalten und den Button auf dem Sperrbildschirm nutzen.' })),
+      h('input', {
+        type: 'checkbox', class: 'switch', checked: s.autoPasskey !== false, 'aria-label': 'Face ID automatisch starten',
+        onchange: (e) => { s.autoPasskey = e.target.checked; persistMeta(); toast('Gespeichert.'); },
+      })) : null;
+
+    const tplArea = (key, label) => h('label', { class: 'f' }, h('span', { text: label }),
+      h('textarea', {
+        rows: '5', value: (s.templates || {})[key] || '', 'aria-label': 'Vorlagentext ' + label,
+        onchange: (e) => { s.templates = Object.assign({}, s.templates, { [key]: e.target.value.trim() }); persistMeta(); toast('Gespeichert.'); },
+      }));
+
+    const recoveryRow = (title, info, setBtns) => h('div', { class: 'setrow wide' },
+      h('div', {}, h('div', { text: title }), h('div', { class: 'muted small', text: info })),
+      h('div', { class: 'btns' }, setBtns));
+    const rcRow = recoveryRow('Wiederherstellungscode',
+      meta.rc ? 'Eingerichtet. Wird nur beim Erzeugen angezeigt.' : 'Nicht eingerichtet.',
+      [
+        h('button', {
+          class: meta.rc ? 'btn sec' : 'btn', style: 'width:auto', type: 'button', text: meta.rc ? 'Neu erzeugen' : 'Erzeugen',
+          onclick: async () => {
+            if (meta.rc && !await confirmDlg('Neuen Code erzeugen?', 'Der bisherige Code wird erst ungültig, wenn du den neuen bestätigt hast.', 'Weiter')) return;
+            if (!await requireCurrentPassword()) return;
+            try { if (await createRecoveryCode()) { toast('Wiederherstellungscode eingerichtet.'); render(); } } catch (e) { toast(e.message || String(e)); }
+          },
+        }),
+        meta.rc && h('button', {
+          class: 'btn sec', style: 'width:auto', type: 'button', text: 'Entfernen',
+          onclick: async () => {
+            if (!await confirmDlg('Code entfernen?', 'Der Wiederherstellungscode funktioniert danach nicht mehr.', 'Entfernen', true)) return;
+            meta.rc = null; persistMeta(); render();
+          },
+        }),
+      ]);
+    const sqRow = recoveryRow('Sicherheitsfragen',
+      meta.sq ? `Eingerichtet (${meta.sq.questions.length} Fragen). Schwächer als der Code.` : 'Nicht eingerichtet.',
+      [
+        h('button', {
+          class: meta.sq ? 'btn sec' : 'btn', style: 'width:auto', type: 'button', text: meta.sq ? 'Ändern' : 'Einrichten',
+          onclick: async () => {
+            if (!await requireCurrentPassword()) return;
+            try { if (await setupQuestions()) { toast('Sicherheitsfragen gespeichert.'); render(); } } catch (e) { toast(e.message || String(e)); }
+          },
+        }),
+        meta.sq && h('button', {
+          class: 'btn sec', style: 'width:auto', type: 'button', text: 'Entfernen',
+          onclick: async () => {
+            if (!await confirmDlg('Sicherheitsfragen entfernen?', 'Die Fragen funktionieren danach nicht mehr zum Zurücksetzen.', 'Entfernen', true)) return;
+            meta.sq = null; persistMeta(); render();
+          },
+        }),
+      ]);
+
     const fieldRows = s.fields.map((f, i) => h('div', { class: 'fieldrow' },
       h('input', {
         type: 'text', value: f.name, placeholder: 'Name', 'aria-label': `Name Messwert ${i + 1}`, maxlength: '40',
@@ -834,12 +1732,12 @@
       })));
 
     root.append(
-      header('Einstellungen',
-        h('button', { class: 'ibtn', type: 'button', 'aria-label': 'Zurück', onclick: () => go('list') }, icon('back')), null),
+      header('Einstellungen', null, lockBtn()),
       h('main', { class: 'wrap' },
         h('div', { class: 'sect' }, h('h2', { text: 'Sicherheit' }),
           h('label', { class: 'f' }, h('span', { text: 'Automatisch sperren' }), lockSel),
           pkRow,
+          autoRow,
           h('div', { class: 'stack', style: 'margin-top:8px' },
             h('button', {
               class: 'btn sec', type: 'button', text: 'Passwort ändern',
@@ -855,9 +1753,48 @@
                 try { meta.pw = await C.wrapWithPassword(dataKey, pw); persistMeta(); toast('Passwort geändert.'); } catch (e) { toast(e.message || String(e)); }
               },
             }))),
-        h('div', { class: 'sect' }, h('h2', { text: 'Messfelder (10)' }),
-          h('p', { class: 'muted small', style: 'margin-top:0', text: 'Name und Einheit für die zehn Messwerte. Änderungen gelten sofort für alle Einträge.' }),
-          fieldRows),
+        h('div', { class: 'sect' }, h('h2', { text: 'Wiederherstellung' }),
+          h('p', { class: 'muted small', style: 'margin-top:0', text: 'Für den Fall, dass Passwort und Face ID verloren sind. Es gibt keinen Server, der das Passwort zurücksetzen könnte, daher sind das zusätzliche Schlüssel für deine Daten. Beide Wege öffnen auch deine Backups.' }),
+          rcRow, sqRow),
+        h('div', { class: 'sect' }, h('h2', { text: 'Standardtexte für die Notiz' }),
+          h('p', { class: 'muted small', style: 'margin-top:0', text: 'Wählst du im Eintrag die Art des Einsatzes, erscheint der passende Text in der Notiz. Eigener Text wird nie überschrieben. Ein leerer Text fügt nichts ein.' }),
+          KINDS.map(([k, label]) => tplArea(k, label)),
+          h('button', {
+            class: 'btn sec', type: 'button', text: 'Auf Standard zurücksetzen',
+            onclick: async () => {
+              if (!await confirmDlg('Standardtexte zurücksetzen?', 'Die drei Texte werden durch die mitgelieferten ersetzt.', 'Zurücksetzen')) return;
+              s.templates = defaultTemplates(); persistMeta(); render(); toast('Zurückgesetzt.');
+            },
+          })),
+        h('div', { class: 'sect' }, h('h2', { text: 'Spesen' }),
+          h('label', { class: 'f' }, h('span', { text: 'Spesen-Hinweis bei Tagessumme' }), spesenSel),
+          h('p', { class: 'muted small', style: 'margin:0', text: 'Gerechnet wird pro Tag: Fahrzeit plus Arbeitszeit aller Einträge mit demselben Datum. Liegt die Summe über der Grenze, erscheint „Spesen“ am Eintrag und der Tag ist im Kalender farbig. Die Regeln und Pauschalen bitte mit deiner Abrechnung abgleichen; Pausen und Wartezeiten, die nicht eingetragen sind, fehlen in der Summe.' })),
+        h('div', { class: 'sect' }, h('h2', { text: `Messfelder (${s.fields.length})` }),
+          h('p', { class: 'muted small', style: 'margin-top:0', text: `Name und Einheit der Messwerte, höchstens ${MAX_FIELDS}. Änderungen gelten sofort für alle Einträge. Ein neuer Eintrag zeigt zuerst nur das erste Feld, weitere kommen mit „Messwert hinzufügen“.` }),
+          fieldRows,
+          h('div', { class: 'row', style: 'margin-top:8px' },
+            h('button', {
+              class: 'btn sec', type: 'button', text: '+ Messfeld', disabled: s.fields.length >= MAX_FIELDS,
+              onclick: async () => {
+                const nf = await newFieldDlg(s.fields.length + 1);
+                if (!nf || !meta || s.fields.length >= MAX_FIELDS) return;
+                s.fields.push(nf); persistMeta(); render();
+                const rows = document.querySelectorAll('.fieldrow input'); if (rows.length >= 2) rows[rows.length - 2].focus();
+              },
+            }),
+            h('button', {
+              class: 'btn sec', type: 'button', text: 'Letztes entfernen', disabled: s.fields.length <= 1,
+              onclick: async () => {
+                const i = s.fields.length - 1;
+                if (i < 1 || !db) return;
+                const used = db.entries.filter((e) => String((e.values || [])[i] ?? '').trim() !== '').length;
+                if (used) { toast(`„${s.fields[i].name}“ ist in ${used} ${used === 1 ? 'Eintrag' : 'Einträgen'} ausgefüllt und kann nicht entfernt werden.`); return; }
+                if (!await confirmDlg('Messfeld entfernen?', `„${s.fields[i].name}“ wird aus der Liste entfernt. Es ist in keinem Eintrag ausgefüllt.`, 'Entfernen', true)) return;
+                if (!meta || s.fields.length - 1 !== i) return;
+                s.fields.pop(); persistMeta(); render();
+                const rb = [...document.querySelectorAll('button')].find((b) => b.textContent === '+ Messfeld'); if (rb) rb.focus();
+              },
+            }))),
         h('div', { class: 'sect' }, h('h2', { text: 'Daten' }),
           h('div', { class: 'stack' },
             h('button', { class: 'btn', type: 'button', onclick: () => exportCsv().catch((e) => toast(e.message || String(e))), text: 'Als CSV exportieren (unverschlüsselt)' }),
@@ -869,7 +1806,7 @@
             text: 'Letztes Backup: ' + (s.lastBackup ? new Date(s.lastBackup).toLocaleString('de-DE', { dateStyle: 'medium', timeStyle: 'short' }) : 'noch nie') +
               '. Die Erinnerung erscheint beim Öffnen der App.',
           }),
-          h('p', { class: 'muted small', text: 'Achtung: Die CSV-Datei enthält Klartext. Das Backup ist verschlüsselt. In dieser App lässt es sich ohne Passwort hinzufügen; auf einem neuen Gerät brauchst du das Passwort, das beim Erstellen galt.' })),
+          h('p', { class: 'muted small', text: 'Achtung: Die CSV-Datei enthält Klartext. Das Backup ist verschlüsselt. In dieser App lässt es sich ohne Passwort hinzufügen; auf einem neuen Gerät brauchst du das Passwort, das beim Erstellen galt, oder (falls eingerichtet) den Wiederherstellungscode bzw. die Antworten auf die Sicherheitsfragen.' })),
         h('div', { class: 'sect' }, h('h2', { text: 'Gefahrenzone' }),
           h('button', {
             class: 'btn danger', type: 'button', text: 'Alle Daten auf diesem Gerät löschen',
@@ -880,7 +1817,8 @@
               view = 'setup'; render();
             },
           })),
-        h('p', { class: 'muted small', style: 'text-align:center', text: 'Work Companion Fieldbook ' + APP_VERSION + ' · Daten bleiben lokal auf diesem Gerät' })));
+        h('p', { class: 'muted small', style: 'text-align:center', text: 'Work Companion Fieldbook ' + APP_VERSION + ' · Daten bleiben lokal auf diesem Gerät' })),
+      tabbar());
   }
 
   /* ------------------------------------------------------------------ */

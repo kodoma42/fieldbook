@@ -7,7 +7,9 @@
  *  - Dieser Datenschlüssel wird mehrfach "eingepackt":
  *      1) mit einem Schlüssel aus dem Passwort (PBKDF2-SHA256, 600.000 Runden)
  *      2) optional mit einem Schlüssel aus dem Passkey (WebAuthn-PRF -> HKDF)
- *  - Man kann die App also mit Passwort ODER Passkey öffnen.
+ *      3) optional mit einem Wiederherstellungscode (PBKDF2, 100 Bit Zufall)
+ *      4) optional mit den Antworten auf selbst gewählte Sicherheitsfragen (PBKDF2)
+ *  - Man kann die App also mit jedem dieser Wege öffnen.
  */
 const MPCrypto = (() => {
   const enc = new TextEncoder();
@@ -85,6 +87,21 @@ const MPCrypto = (() => {
     return unwrap(pk, kek);
   }
 
+  /* Wiederherstellungscode und Sicherheitsfragen: zusätzliche Schlüssel-Hüllen um denselben Datenschlüssel.
+     Der Code hat 20 Zeichen aus einem 32er-Alphabet (ohne I, O, 0, 1) = 100 Bit Zufall. */
+  const CODE_ALPHA = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  function newRecoveryCode() {
+    const r = rand(20);
+    let s = '';
+    for (let i = 0; i < 20; i++) s += CODE_ALPHA[r[i] & 31]; // 256 ist durch 32 teilbar, daher gleichverteilt
+    return s;
+  }
+  const normCode = (s) => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const formatCode = (s) => (normCode(s).match(/.{1,4}/g) || []).join('-');
+  // Antworten: Groß-/Kleinschreibung und Leerzeichen sind egal, die Reihenfolge der Fragen zählt
+  const answersSecret = (list) =>
+    'fieldbook-sq:' + list.map((a) => String(a || '').normalize('NFKC').toLowerCase().replace(/\s+/g, '')).join('\u0001');
+
   async function encryptJSON(obj, key) {
     const iv = rand(12);
     const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, enc.encode(JSON.stringify(obj)));
@@ -100,6 +117,7 @@ const MPCrypto = (() => {
     b64, rand, newDataKey,
     wrapWithPassword, unwrapWithPassword,
     wrapWithPrf, unwrapWithPrf,
+    newRecoveryCode, normCode, formatCode, answersSecret,
     encryptJSON, decryptJSON,
   };
 })();

@@ -6,7 +6,7 @@ Die App **Work Companion Fieldbook** wurde vollständig mit künstlicher Intelli
 **Von einem Menschen** (dem Ideengeber) stammen:
 - die Idee zur App und der Zweck,
 - die Anforderungen: welche Daten erfasst werden, Verschlüsselung, Backup, Erinnerungen,
-- alle Ideen und Wünsche für Version 2 und das Design,
+- alle Ideen und Wünsche für die weiteren Versionen und das Design,
 - die Entscheidungen, etwa zu Name, Icon und Aufbau,
 - das Testen im Alltag.
 
@@ -24,9 +24,14 @@ regelmäßige Backups werden empfohlen.
 
 ## Bekannte Grenzen (bitte vor der Nutzung lesen)
 
-- **Kein Zurücksetzen des Passworts.** Wer Passwort und Passkey verliert, kommt nicht mehr an die
-  Daten auf dem Gerät. Nur ein Backup mit bekanntem Passwort hilft dann. (Ein Wiederherstellungscode
-  ist für Version 2 geplant.)
+- **Kein Zurücksetzen per Server.** Es gibt kein Konto und keinen Server. Wer Passwort, Passkey **und**
+  Wiederherstellungscode (bzw. Antworten auf die Sicherheitsfragen) verliert, kommt nicht mehr an die
+  Daten. Der Wiederherstellungscode wird nur einmal angezeigt und muss vom Nutzer selbst sicher aufbewahrt
+  werden. Die Sicherheitsfragen sind schwächer als der Code (Antworten lassen sich raten, die Fragen stehen
+  lesbar im Gerätespeicher) und sind nur eine Ergänzung. Ein Backup trägt die Hüllen, die zum Zeitpunkt
+  des Backups galten: ein später erneuerter Code öffnet ältere Backups nicht, ein alter Code oder ein altes
+  Passwort öffnet sie dagegen weiterhin. Nach "Alles ersetzen" gelten wieder Code und Sicherheitsfragen aus
+  dem Backup; die App weist darauf hin und bietet an, gleich einen neuen Code zu erzeugen.
 - **Daten liegen nur auf diesem einen Gerät.** Kein Abgleich zwischen Geräten, keine Cloud. Geht das
   iPhone verloren oder kaputt, sind die Daten ohne Backup weg.
 - **Nur als Home-Bildschirm-App zuverlässig.** In einem normalen Safari-Tab kann iOS ungenutzte
@@ -37,8 +42,17 @@ regelmäßige Backups werden empfohlen.
   muss der Passkey neu eingerichtet werden (die Daten selbst nur per Backup).
 - **Begrenzter Speicher** (ca. 5 MB im Browser), reicht für mehrere tausend Einträge.
 - **Ungespeicherte Eingaben:** Sperrt sich die App automatisch, während ein Eintrag noch nicht
-  gespeichert ist, gehen diese Eingaben verloren (Entwurfsspeicherung ist für Version 2 geplant).
+  gespeichert ist, gehen diese Eingaben verloren. Zurück-Pfeil und Wechsel der Reiter fragen bisher nicht
+  nach (Warnung und Entwurfsspeicherung sind noch geplant).
+- **Face ID automatisch beim Öffnen** kann auf manchen iPhones von iOS abgelehnt werden (iOS verlangt
+  teils eine Berührung vor dem Passkey). Dann erscheint nur der gewohnte Button. Die Funktion lässt sich
+  in den Einstellungen ausschalten.
+- **Android und andere Browser** sind nicht getestet. Ob dort der Passkey mit der Verschlüsselung (PRF)
+  funktioniert, hängt von System und Browser ab. Das Passwort funktioniert immer.
+- **Spesen-Hinweis:** Er rechnet pro Tag Fahrzeit plus Arbeitszeit aller Einträge und vergleicht mit einer
+  einstellbaren Grenze. Pausen, Wartezeiten und steuerliche Regeln sind nicht berücksichtigt; es ist keine
+  Abrechnung und keine Beratung.
 - **Getestet** wurde mit automatischen Tests in Chromium und im Alltagstest durch den Ideengeber (läuft noch), nicht
   systematisch auf verschiedenen iPhone-Modellen und iOS-Versionen.
 
-Stand: 06.10.2026
+Stand: 07.10.2026

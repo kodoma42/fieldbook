@@ -1,7 +1,10 @@
 'use strict';
-const CACHE = 'fieldbook-1.1'; // bei jeder neuen Version anpassen
+const CACHE = 'fieldbook-1.5'; // bei jeder neuen Version anpassen, sonst kommt das Update nicht an
 const FILES = ['./', 'index.html', 'crypto.js', 'app.js', 'manifest.webmanifest', 'icon-180.png', 'icon-512.png'];
 
+// Updates kommen nur als Ganzes: Der Browser prüft bei jedem Start, ob sich sw.js geändert hat.
+// Wenn ja, werden alle Dateien zusammen neu geladen (klappt eine nicht, bleibt die alte Version
+// komplett erhalten). So laufen nie Dateien aus zwei verschiedenen Versionen gemischt.
 self.addEventListener('install', (e) => {
   // cache: 'reload' umgeht den HTTP-Cache, damit wirklich die neue Version gespeichert wird.
   e.waitUntil(
@@ -18,31 +21,18 @@ self.addEventListener('activate', (e) => {
 });
 
 async function fromCache(req) {
-  const hit = await caches.match(req, { ignoreSearch: true });
+  const c = await caches.open(CACHE);
+  const hit = await c.match(req, { ignoreSearch: true });
   if (hit) return hit;
-  if (req.mode === 'navigate') return caches.match('./');
+  if (req.mode === 'navigate') return c.match('./');
   return undefined;
 }
 
 // Cache zuerst: Die App startet sofort aus dem Speicher, auch ohne Netz oder bei schwachem Empfang.
-// Im Hintergrund wird die Datei aus dem Netz geholt und für den nächsten Start gespeichert.
+// Nur was nicht im Speicher liegt, wird aus dem Netz geholt.
 self.addEventListener('fetch', (e) => {
   const req = e.request;
   if (req.method !== 'GET' || new URL(req.url).origin !== location.origin) return;
-
-  // no-cache: beim Server nachfragen, ob es eine neuere Version gibt (sonst bis zu 10 Min. alter HTTP-Cache).
-  const network = fetch(req.url, { cache: 'no-cache', credentials: 'same-origin' }).then((res) => {
-    if (res && res.ok && !res.redirected) {
-      const copy = res.clone();
-      return caches.open(CACHE).then((c) => c.put(req, copy)).then(() => res);
-    }
-    return res;
-  });
-
-  e.waitUntil(network.then(() => {}, () => {}));
   e.respondWith(
-    fromCache(req).then((cached) => {
-      if (cached) return cached;
-      return network.catch(() => fromCache(req).then((r) => r || Response.error()));
-    }));
+    fromCache(req).then((cached) => cached || fetch(req).catch(() => Response.error())));
 });

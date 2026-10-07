@@ -1,92 +1,63 @@
 # Work Companion Fieldbook (PWA)
 
-Diese App wurde vollständig mit KI erstellt, die Ideen kamen von einem Menschen. Details: `KI-HINWEIS.md`.
+Diese App wurde vollständig mit KI erstellt, die Ideen kamen von einem Menschen. Details und bekannte Grenzen: `KI-HINWEIS.md`.
 
+Verschlüsselte Erfassung von Kunde, Kunden-ID, Datum, Art des Einsatzes (Installation, Wartung, Reparatur),
+Anfahrt, Abfahrt, Arbeitszeit, Seriennummer, bis zu 50 frei benennbaren Messwerten und einer Notiz mit
+einstellbaren Standardtexten. Dazu Kundenansicht, Datumsfilter und ein Kalender mit Spesen-Hinweis.
+Alle Daten bleiben lokal auf dem Gerät, es gibt keinen Server und kein Konto.
 Angezeigt wird "Work Companion Fieldbook", unter dem Icon auf dem Home-Bildschirm kurz "Fieldbook".
-Repository und Web-Adresse heißen `fieldbook`. Die Adresse sollte später nicht mehr geändert werden: Daten und
-Face ID hängen an ihr, bei einer neuen Adresse wäre die App leer (Daten nur per Backup übertragbar).
 
-Verschlüsselte Erfassung von Kunde, Kunden-ID, Datum, Fahrzeit, Arbeitszeit,
-Seriennummer und 10 frei benennbaren Messwerten. Alle Daten bleiben lokal auf dem Gerät.
+## Nutzung (iPhone)
 
-## Installation (iPhone)
-
-Die App muss über **HTTPS** erreichbar sein (Voraussetzung für Passkey und Offline-Betrieb).
-Eine lokal geöffnete Datei reicht nicht.
-
-Einfachste Wege, alle Dateien dieses Ordners zu hosten:
-
-1. **GitHub Pages**: Neues Repository anlegen, alle Dateien hochladen, unter
-   Settings > Pages den Branch `main` aktivieren.
-2. **Cloudflare Pages / Netlify**: Ordner per Drag & Drop hochladen.
-3. **Eigener Server**: Ordner in das Webroot von nginx/Caddy legen, HTTPS aktivieren.
-
-Auf dem Server liegen nur der App-Code, keine Daten. Es ist also unkritisch, dass die Seite öffentlich erreichbar ist.
+Die App besteht nur aus statischen Dateien und muss über **HTTPS** erreichbar sein (Voraussetzung für
+Passkey und Offline-Betrieb). Eine lokal geöffnete Datei reicht nicht. Jeder Webspace für statische Seiten
+genügt, zum Beispiel GitHub Pages, Cloudflare Pages, Netlify oder ein eigener Server mit HTTPS.
+Auf dem Server liegen nur der App-Code, keine Daten.
 
 Danach in Safari die Adresse öffnen, auf **Teilen > Zum Home-Bildschirm** tippen und die App von dort starten.
-
-## Hochladen per iPad (nur Safari, ohne Computer)
-
-1. ZIP in der Dateien-App antippen, sie wird entpackt. Es entsteht der Ordner `fieldbook`.
-2. Auf github.com ein kostenloses Konto anlegen und oben rechts **+ > New repository** wählen.
-   Name `fieldbook`, Sichtbarkeit **Public** (kostenloses GitHub Pages geht nur mit öffentlichen Repositories), **Create repository**.
-3. Im leeren Repository **uploading an existing file** (oder **Add file > Upload files**) wählen, dann **choose your files**
-   und alle Dateien aus dem entpackten Ordner auswählen. Sie müssen direkt im Hauptverzeichnis des Repositories liegen,
-   nicht in einem Unterordner. Unten **Commit changes**.
-4. **Settings > Pages**: Source "Deploy from a branch", Branch `main`, Ordner `/ (root)`, **Save**.
-   Bei kleinem Display hilft "Desktop-Website anfordern" (Symbol "aA" in der Adressleiste).
-5. Nach ein bis zwei Minuten ist die App unter `https://DEINNAME.github.io/fieldbook/` erreichbar.
-   In Safari öffnen, **Teilen > Zum Home-Bildschirm**, und erst danach Passwort und Face ID einrichten.
-
-Updates später: Datei im Repository öffnen, Stift-Symbol, Inhalt ersetzen, committen. Oder über **Upload files** mit gleichem
-Dateinamen überschreiben. Alternative für häufige Updates: die iPad-App "Working Copy" (Git-Client).
-
-Hinweis: Bei einem öffentlichen Repository sind Code und `KI-HINWEIS.md` für alle sichtbar. Die Daten in der App sind davon nicht betroffen.
-
-## Hochladen per Git (Linux/Mac)
-
-```bash
-unzip work-companion.zip && cd fieldbook
-git init -b main
-git add .
-git commit -m "Fieldbook PWA"
-
-# Variante A: mit GitHub CLI (pacman -S github-cli, dann: gh auth login)
-gh repo create fieldbook --public --source=. --push
-
-# Variante B: Repository vorher im Browser anlegen, dann:
-git remote add origin https://github.com/DEINNAME/fieldbook.git
-git push -u origin main
-```
-
-Danach auf GitHub unter Settings > Pages den Branch `main` mit Ordner `/ (root)` aktivieren.
-Die App ist dann unter `https://DEINNAME.github.io/fieldbook/` erreichbar.
-
-Updates später: geänderte Dateien ersetzen, dann `git add . && git commit -m "Update" && git push`.
+Erst dann Passwort und Face ID einrichten.
 
 ## Versionen
 
+- **1.5** (07.10.2026): Messwerte schrittweise: Ein neuer Eintrag zeigt zuerst ein Messfeld, weitere kommen
+  mit "Messwert hinzufügen". Mehr als 10 Messfelder möglich (bis 50), Name und Einheit zentral in den
+  Einstellungen. Updates werden nur noch als Ganzes übernommen.
+- **1.4** (07.10.2026): "Art des Einsatzes" mit Standardtexten für die Notiz (in den Einstellungen änderbar),
+  Fahrzeit getrennt in Anfahrt und Abfahrt (ältere Einträge behalten ihre Gesamt-Fahrzeit),
+  Face ID auf Wunsch automatisch beim Öffnen (Einstellung, kann ausgeschaltet werden).
+- **1.3** (07.10.2026): Reiterleiste (Einträge, Kunden, Kalender, Einstellungen), Kundenansicht mit
+  Messwert-Verlauf, Datumsfilter für die Liste, Kalender mit Spesen-Hinweis (pro Tag, Grenze einstellbar).
+- **1.2** (07.10.2026): "Passwort vergessen": Wiederherstellungscode mit Notfallblatt und optionale
+  Sicherheitsfragen. Beide Wege öffnen auch Backups.
 - **1.1** (06.10.2026): Startet ohne Netz sofort aus dem Speicher (vorher weißer Bildschirm im Flugmodus).
   Versionsnummer auf Start- und Sperrbildschirm und in der Fußzeile.
 - **1.0** (06.10.2026): Erste Version.
 
-Neue Version: `APP_VERSION` in `app.js` und `CACHE` in `sw.js` erhöhen. Updates erscheinen auf dem Gerät
-erst beim übernächsten Start mit Netz.
-
 ## Wichtig
 
-- Der Passkey ist an die **Domain** gebunden. Wird die Adresse später geändert, funktioniert er nicht mehr
-  (das Passwort und Backups funktionieren weiterhin).
-- Es gibt **keine Passwort-Wiederherstellung**. Regelmäßig ein verschlüsseltes Backup erstellen
-  (Einstellungen > Verschlüsseltes Backup) und an einem sicheren Ort ablegen.
+- Der Passkey und die Daten sind an die **Adresse (Domain)** gebunden. Wird die Adresse später geändert,
+  ist die App dort leer und der Passkey funktioniert nicht mehr (Passwort und Backups funktionieren weiterhin).
+- Es gibt **keinen Server, der das Passwort zurücksetzen kann**. Wer Passwort, Passkey und
+  Wiederherstellungscode verliert, verliert die Daten. Deshalb den Wiederherstellungscode erzeugen
+  (Einstellungen > Wiederherstellung) und zu Hause aufbewahren, und regelmäßig ein verschlüsseltes Backup
+  erstellen (Einstellungen > Verschlüsseltes Backup).
+- Getestet wurde nur auf dem iPhone (Safari / Home-Bildschirm) und in Chromium am Computer.
+  Android und andere Browser sind nicht getestet; ob dort der Passkey mit der Verschlüsselung (PRF) funktioniert,
+  ist offen. Das Passwort funktioniert immer.
+- Die Spesen-Anzeige ist nur ein Hinweis (Fahrzeit plus Arbeitszeit pro Tag über der eingestellten Grenze),
+  keine Abrechnung und keine steuerliche Beratung.
 - Die CSV-Datei ist unverschlüsselt (für Excel/Numbers, Trennzeichen Semikolon).
 
 ## Sicherheitsmodell
 
 - Zufälliger 256-Bit-Datenschlüssel, AES-GCM für alle Einträge.
 - Der Datenschlüssel wird eingepackt mit dem Passwort (PBKDF2-SHA256, 600.000 Runden)
-  und optional mit dem Passkey (WebAuthn-PRF + HKDF). Beides funktioniert parallel.
+  und optional mit dem Passkey (WebAuthn-PRF + HKDF), einem Wiederherstellungscode (20 Zeichen, 100 Bit Zufall,
+  PBKDF2) und den Antworten auf selbst gewählte Sicherheitsfragen (PBKDF2, schwächer als der Code).
+  Alle Wege funktionieren parallel und öffnen auch die Backups.
 - Automatische Sperre nach einstellbarer Zeit, der Schlüssel liegt nur im Arbeitsspeicher.
+- Die Verschlüsselung wurde nicht von unabhängigen Fachleuten geprüft (siehe `KI-HINWEIS.md`).
 
 ## Dateien
 
