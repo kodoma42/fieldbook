@@ -20,6 +20,9 @@ Erst dann Passwort und Face ID einrichten.
 
 ## Versionen
 
+- **1.5.5** (07.10.2026): Firmenname in den Einstellungen (steht dann oben statt des App-Namens und auf dem
+  Sperrbildschirm; ohne Firmenname steht oben der volle Name "Work Companion Fieldbook"). Reiter "Kunden" und
+  "Kalender" lassen sich ausblenden, die Daten bleiben erhalten.
 - **1.5.4** (07.10.2026): Spesen in Violett (Marke an den Einträgen, Hinweis im Eintrag, hinterlegte Tage im Kalender),
   damit sie sich klar vom orangen "Wartung" unterscheiden. Der Backup-Hinweis bleibt orange.
 - **1.5.3** (07.10.2026): Korrekturen nach der Prüfung: Spesen-Marke im Dunkelmodus wieder lesbar, Kalenderpunkte
@@ -60,6 +63,8 @@ Erst dann Passwort und Face ID einrichten.
 - Die Spesen-Anzeige ist nur ein Hinweis (Fahrzeit plus Arbeitszeit pro Tag über der eingestellten Grenze),
   keine Abrechnung und keine steuerliche Beratung.
 - Die CSV-Datei ist unverschlüsselt (für Excel/Numbers, Trennzeichen Semikolon).
+- Die Einstellungen (z. B. Firmenname, Messfeld-Namen, Standardtexte) liegen unverschlüsselt im Speicher und im
+  Backup, damit z. B. der Firmenname schon auf dem Sperrbildschirm stehen kann. Die Einträge selbst sind verschlüsselt.
 
 ## Sicherheitsmodell
 

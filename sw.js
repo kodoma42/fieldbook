@@ -1,5 +1,5 @@
 'use strict';
-const CACHE = 'fieldbook-1.5.4'; // bei jeder neuen Version anpassen, sonst kommt das Update nicht an
+const CACHE = 'fieldbook-1.5.5'; // bei jeder neuen Version anpassen, sonst kommt das Update nicht an
 const FILES = ['./', 'index.html', 'crypto.js', 'app.js', 'manifest.webmanifest', 'icon-180.png', 'icon-512.png'];
 
 // Updates kommen nur als Ganzes: Der Browser prüft bei jedem Start, ob sich sw.js geändert hat.

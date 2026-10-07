@@ -3,7 +3,7 @@
   const C = MPCrypto;
   const META_KEY = 'mp_meta_v1';
   const DATA_KEY = 'mp_data_v1';
-  const APP_VERSION = '1.5.4';
+  const APP_VERSION = '1.5.5';
   const root = document.getElementById('app');
 
   /* ------------------------------------------------------------------ */
@@ -386,6 +386,8 @@
     spesenMin: 480, // Spesen-Hinweis ab mehr als 8 Stunden Fahr- + Arbeitszeit pro Tag (0 = aus)
     fontSize: 'normal', // 'normal' | 'big'
     autoPasskey: true, // Face ID beim Öffnen automatisch starten (wenn ein Passkey eingerichtet ist)
+    company: '', // Firmenname: ersetzt den App-Namen in der Kopfzeile, steht auf dem Sperrbildschirm (unverschlüsselt)
+    hiddenTabs: [], // ausgeblendete Reiter: 'customers' und/oder 'calendar'
     templates: defaultTemplates(),
     fields: Array.from({ length: 10 }, (_, i) => ({ name: 'Messwert ' + (i + 1), unit: '' })),
   });
@@ -410,6 +412,7 @@
     meta.settings = Object.assign(defaultSettings(), meta.settings || {});
     fixFields(meta.settings);
     if (meta.settings.fontSize !== 'big') meta.settings.fontSize = 'normal';
+    fixLook(meta.settings);
     applyFontSize();
   }
 
@@ -421,6 +424,13 @@
     const big = meta && meta.settings && meta.settings.fontSize === 'big';
     document.documentElement.setAttribute('data-fs', big ? 'big' : 'normal');
   }
+  // Firmenname und ausgeblendete Reiter auf gültige Werte bringen (auch für Backups aus älteren Versionen)
+  function fixLook(s) {
+    s.company = Array.from(String(s.company || '').replace(/\s+/g, ' ').trim()).slice(0, 60).join('').trim(); // nach Zeichen kürzen, nicht mitten im Emoji
+    s.hiddenTabs = Array.isArray(s.hiddenTabs) ? [...new Set(s.hiddenTabs.filter((t) => t === 'customers' || t === 'calendar'))] : [];
+  }
+  const companyName = () => (meta && meta.settings && meta.settings.company) || '';
+  const tabHidden = (t) => !!(meta && meta.settings && meta.settings.hiddenTabs.includes(t));
   function fixFields(s) {
     if (!Array.isArray(s.fields)) s.fields = defaultSettings().fields;
     // Kaputte Einträge werden ersetzt, nicht entfernt: sonst rutschen Namen auf falsche Werte
@@ -856,6 +866,7 @@
       const recoveryChanged = !!(meta && (meta.rc || meta.sq) && (!same(meta.rc, b.rc) || !same(meta.sq, b.sq)));
       const settings = Object.assign(defaultSettings(), b.settings || {});
       fixFields(settings);
+      fixLook(settings);
       ensureFieldsForData(settings, d.entries);
       // Beide Teile (Schlüssel-Infos und Daten) müssen zusammenpassen. Klappt das Schreiben nicht
       // (z. B. Speicher voll), wird der alte Stand zurückgeschrieben, damit nichts unlesbar wird.
@@ -902,6 +913,9 @@
   /* Ansichten                                                           */
   /* ------------------------------------------------------------------ */
   function render() {
+    // Ausgeblendeter Reiter (z. B. nach dem Einspielen eines Backups): zurück zu den Einträgen
+    const tabView = view === 'customer' ? 'customers' : view;
+    if ((tabView === 'customers' || tabView === 'calendar') && tabHidden(tabView)) view = 'list';
     root.replaceChildren();
     document.querySelectorAll('.overlay').forEach((o) => o.remove());
     const fn = {
@@ -986,7 +1000,8 @@
     pw.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
     const kids = [
       h('img', { class: 'logo', src: 'icon-180.png', alt: '' }),
-      h('div', { class: 'brand', text: 'Work Companion Fieldbook' }),
+      h('div', { class: 'brand', text: companyName() || 'Work Companion Fieldbook' }),
+      companyName() ? h('div', { class: 'brand-sub muted small', text: 'Work Companion Fieldbook' }) : null,
       h('h1', { text: 'Gesperrt' }),
       h('p', { class: 'muted', text: 'Entsperre die App, um deine Einträge zu sehen.' }),
     ];
@@ -1072,9 +1087,13 @@
     return h('div', { class: 'version', text: 'Version ' + APP_VERSION });
   }
 
-  function header(title, left, right) {
-    return h('div', { class: 'bar' }, left, h('h1', { text: title }), right);
+  function header(title, left, right, cls) {
+    return h('div', { class: 'bar' }, left, h('h1', { text: title, class: cls || null }), right);
   }
+  // Kopfzeile der Einträge: Firmenname, sonst der volle App-Name (etwas kleiner, darf umbrechen)
+  const appHeader = (right) => companyName()
+    ? header(companyName(), null, right, 'apptitle')
+    : header('Work Companion Fieldbook', null, right, 'apptitle long');
 
   /* ------------------------------------------------------------------ */
   /* Reiterleiste, Datumsfilter, Kunden, Kalender                        */
@@ -1087,7 +1106,7 @@
 
   function tabbar() {
     const cur = tabOf(view);
-    return h('nav', { class: 'tabs', 'aria-label': 'Hauptmenü' }, TABS.map(([v, label, ic]) => h('button', {
+    return h('nav', { class: 'tabs', 'aria-label': 'Hauptmenü' }, TABS.filter(([v]) => !tabHidden(v)).map(([v, label, ic]) => h('button', {
       class: 'tab', type: 'button', 'aria-current': v === cur ? 'page' : null,
       onclick: () => { if (v === 'customers') selCustomer = null; go(v); },
     }, icon(ic), h('span', { text: label }))));
@@ -1188,7 +1207,7 @@
     }
 
     root.append(
-      header('Fieldbook', null, lockBtn()),
+      appHeader(lockBtn()),
       h('main', { class: 'wrap' }, backupBanner(), input,
         h('div', { class: 'datefilter' },
           h('label', {}, h('span', { text: 'Von' }), from),
@@ -1697,6 +1716,23 @@
         onchange: (e) => { s.autoPasskey = e.target.checked; persistMeta(); toast('Gespeichert.'); },
       })) : null;
 
+    const companyIn = h('input', {
+      type: 'text', value: s.company || '', maxlength: '60', placeholder: 'z. B. Muster GmbH', autocapitalize: 'words',
+      autocomplete: 'organization', 'aria-label': 'Firmenname',
+      onchange: (e) => { s.company = e.target.value; fixLook(s); e.target.value = s.company; persistMeta(); toast('Gespeichert.'); },
+    });
+    const tabRow = (key, label) => h('label', { class: 'setrow switchrow' },
+      h('div', {}, h('div', { text: 'Reiter „' + label + '“ anzeigen' })),
+      h('input', {
+        type: 'checkbox', class: 'switch', checked: !s.hiddenTabs.includes(key), 'data-tab': key,
+        onchange: (e) => {
+          s.hiddenTabs = e.target.checked ? s.hiddenTabs.filter((t) => t !== key) : [...s.hiddenTabs, key];
+          // Nur die Reiterleiste neu zeichnen, damit der Schalter (und der VoiceOver-Fokus) erhalten bleibt
+          fixLook(s); persistMeta();
+          const nav = document.querySelector('nav.tabs'); if (nav) nav.replaceWith(tabbar());
+        },
+      }));
+
     const tplArea = (key, label) => h('label', { class: 'f' }, h('span', { text: label }),
       h('textarea', {
         rows: '5', value: (s.templates || {})[key] || '', 'aria-label': 'Vorlagentext ' + label,
@@ -1759,7 +1795,11 @@
       h('main', { class: 'wrap' },
         h('div', { class: 'sect' }, h('h2', { text: 'Darstellung' }),
           h('label', { class: 'f', style: 'margin:0' }, h('span', { text: 'Schriftgröße' }), fsSel),
-          h('p', { class: 'muted small', style: 'margin:8px 0 0', text: 'Groß hilft draußen bei Sonne oder mit Handschuhen. Es gilt für die ganze App.' })),
+          h('p', { class: 'muted small', style: 'margin:8px 0 0', text: 'Groß hilft draußen bei Sonne oder mit Handschuhen. Es gilt für die ganze App.' }),
+          h('label', { class: 'f', style: 'margin:16px 0 0' }, h('span', { text: 'Firmenname (optional)' }), companyIn),
+          h('p', { class: 'muted small', style: 'margin:8px 0 0', text: 'Steht dann oben statt „Work Companion Fieldbook“ und auf dem Sperrbildschirm. Er wird wie die übrigen Einstellungen unverschlüsselt gespeichert, auch im Backup. Leer lassen für den App-Namen.' }),
+          h('div', { style: 'margin-top:12px' }, tabRow('customers', 'Kunden'), tabRow('calendar', 'Kalender')),
+          h('p', { class: 'muted small', style: 'margin:8px 0 0', text: 'Ausgeblendete Reiter behalten ihre Daten. „Einträge“ und „Einstellungen“ bleiben immer sichtbar.' })),
         h('div', { class: 'sect' }, h('h2', { text: 'Sicherheit' }),
           h('label', { class: 'f' }, h('span', { text: 'Automatisch sperren' }), lockSel),
           pkRow,

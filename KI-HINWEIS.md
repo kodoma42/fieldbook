@@ -38,6 +38,8 @@ regelmäßige Backups werden empfohlen.
   Daten nach einiger Zeit löschen. Daher die App über "Zum Home-Bildschirm" installieren.
 - **Löscht man die Home-Bildschirm-App, sind auch ihre Daten weg.** Vorher ein Backup machen.
 - **Der CSV-Export ist unverschlüsselt.** Wer die Datei hat, kann alles lesen.
+- **Die Einstellungen sind nicht verschlüsselt** (Firmenname, Namen der Messfelder, Standardtexte, Spesen-Grenze
+  usw.), weder im Speicher noch im Backup. Deshalb dort keine vertraulichen Angaben eintragen.
 - **Face ID / Passkey ist an die Web-Adresse gebunden.** Zieht die App auf eine andere Adresse um,
   muss der Passkey neu eingerichtet werden (die Daten selbst nur per Backup).
 - **Begrenzter Speicher** (ca. 5 MB im Browser), reicht für mehrere tausend Einträge.
