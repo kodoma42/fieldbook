@@ -3,7 +3,8 @@
   const C = MPCrypto;
   const META_KEY = 'mp_meta_v1';
   const DATA_KEY = 'mp_data_v1';
-  const APP_VERSION = '1.5.5';
+  const DRAFT_KEY = 'mp_draft_v1'; // verschlüsselter Entwurf eines noch nicht gespeicherten Eintrags
+  const APP_VERSION = '1.6';
   const root = document.getElementById('app');
 
   /* ------------------------------------------------------------------ */
@@ -469,11 +470,78 @@
   async function loadDb() {
     const box = store.get(DATA_KEY);
     db = box ? await C.decryptJSON(box, dataKey) : { entries: [] };
-    if (!Array.isArray(db.entries)) db.entries = [];
+    fixDb(db);
     if (ensureFieldsForData(meta.settings, db.entries)) persistMeta();
+  }
+  // Datenbestand auf gültige Form bringen (auch für Backups aus älteren Versionen ohne "deleted")
+  function fixDb(d) {
+    if (!Array.isArray(d.entries)) d.entries = [];
+    // Gelöschte Einträge: { id, at }. Damit kommen sie beim Zusammenführen eines älteren Backups nicht zurück.
+    d.deleted = Array.isArray(d.deleted) ? d.deleted.filter((t) => t && typeof t.id === 'string') : [];
+    return d;
+  }
+
+  /* Entwurf: Solange ein Eintrag geändert, aber nicht gespeichert ist, wird sein Stand verschlüsselt
+     (mit dem Datenschlüssel) mitgeschrieben. Sperrt sich die App oder beendet iOS sie im Hintergrund,
+     geht nichts verloren: Nach dem Entsperren öffnet sich der Eintrag mit dem letzten Stand. */
+  let draftCollect = null; // von der Eintragsansicht gesetzt: liefert den Stand oder null (keine Änderungen)
+  let draftTimer = null;
+  let draftSeq = 0;
+  function stashDraft() {
+    clearTimeout(draftTimer); draftTimer = null;
+    if (!draftCollect || !dataKey || !editing || view !== 'edit') return;
+    const e = draftCollect();
+    const seq = ++draftSeq;
+    if (!e) { store.del(DRAFT_KEY); return; }
+    const d = { v: 1, entry: e, isNew: !!editing.isNew, back: editing.back || 'list', at: Date.now() };
+    C.encryptJSON(d, dataKey).then((box) => {
+      if (seq !== draftSeq) return; // inzwischen neuer Stand oder Entwurf verworfen
+      try { store.set(DRAFT_KEY, box); } catch { /* Speicher voll: der Entwurf ist nur eine Absicherung */ }
+    }).catch(() => {});
+  }
+  function scheduleDraft() { clearTimeout(draftTimer); draftTimer = setTimeout(stashDraft, 250); }
+  function clearDraft() {
+    clearTimeout(draftTimer); draftTimer = null; draftSeq++;
+    draftCollect = null; store.del(DRAFT_KEY);
+  }
+  async function restoreDraft(note) {
+    const box = store.get(DRAFT_KEY);
+    if (!box || !dataKey || !db) return;
+    let d = null;
+    try { d = await C.decryptJSON(box, dataKey); } catch { d = null; }
+    if (!d || !d.entry || typeof d.entry.id !== 'string') { store.del(DRAFT_KEY); return; }
+    if (!db || view === 'edit') return; // inzwischen gesperrt oder schon in einem Eintrag
+    const orig = db.entries.find((e) => e.id === d.entry.id);
+    // Wurde der Eintrag inzwischen anders geändert oder gelöscht (z. B. durch "Backup hinzufügen"),
+    // würde Speichern den neueren Stand überschreiben bzw. den gelöschten Eintrag zurückholen: erst fragen.
+    const base = d.entry.updatedAt || 0;
+    const tomb = db.deleted.find((t) => t.id === d.entry.id);
+    const newer = !d.isNew && orig && (orig.updatedAt || 0) > base;
+    const gone = !d.isNew && (!orig || (tomb && tomb.at >= base));
+    if (newer || gone) {
+      const ok = await modal((box, close) => {
+        box.append(
+          h('h3', { text: 'Nicht gespeicherte Eingaben' }),
+          h('p', {
+            text: (gone ? 'Der Eintrag wurde inzwischen gelöscht.' : 'Der Eintrag wurde inzwischen geändert (z. B. durch ein Backup).') +
+              ' Öffnest du deine nicht gespeicherten Eingaben und speicherst sie, ' +
+              (gone ? 'wird der Eintrag neu angelegt.' : 'ersetzen sie den neueren Stand.'),
+          }),
+          h('div', { class: 'stack' },
+            h('button', { class: 'btn', type: 'button', onclick: () => close(true), text: 'Eingaben öffnen' }),
+            h('button', { class: 'btn danger', type: 'button', onclick: () => close('drop'), text: 'Eingaben verwerfen' })));
+      });
+      if (ok === 'drop') { store.del(DRAFT_KEY); return; }
+      if (ok !== true || !db || view === 'edit') return; // Dialog geschlossen oder gesperrt: Entwurf bleibt
+    }
+    editing = { entry: d.entry, isNew: !!d.isNew || !orig, back: d.back || 'list', restored: true };
+    go('edit');
+    toast((note ? note + ' ' : '') + 'Nicht gespeicherte Eingaben wiederhergestellt.');
   }
 
   function lock() {
+    stashDraft(); // offenen Eintrag sichern, bevor alles aus dem Speicher genommen wird
+    draftCollect = null;
     dataKey = null; db = null; editing = null; search = '';
     filter = { from: '', to: '' }; selCustomer = null; calDay = null;
     autoTry = false; // nach dem Sperren (von Hand oder automatisch) fragt Face ID nicht von selbst
@@ -482,12 +550,13 @@
   }
   function go(v) { view = v; render(); window.scrollTo(0, 0); }
 
-  function afterUnlock() {
+  function afterUnlock(skipDraft) {
     applyFontSize();
     view = 'list'; search = ''; lastActivity = Date.now();
     const now = new Date();
     cal = { y: now.getFullYear(), m: now.getMonth() }; calDay = todayStr();
     render();
+    if (!skipDraft) restoreDraft().catch(() => {});
   }
 
   /* Automatische Sperre */
@@ -503,6 +572,7 @@
     if (!dataKey) return;
     const min = meta.settings.lockMin;
     if (document.hidden) {
+      stashDraft(); // iOS kann die App im Hintergrund jederzeit beenden
       hiddenAt = Date.now();
       if (min === 0 && !suspendLock) lock();
     } else {
@@ -759,11 +829,21 @@
       }
       if (!db) return; // inzwischen gesperrt
       const before = db.entries.slice();
-      const next = db.entries.map((e) => Object.assign({}, e));
+      const beforeDel = db.deleted.slice();
+      // Gelöschte Einträge aus beiden Beständen zusammenführen (je ID der späteste Zeitpunkt).
+      // Ein Eintrag gilt als gelöscht, wenn er nach seiner letzten Änderung gelöscht wurde.
+      const del = new Map();
+      for (const t of [...db.deleted, ...(Array.isArray(d.deleted) ? d.deleted : [])]) {
+        if (t && typeof t.id === 'string') del.set(t.id, Math.max(del.get(t.id) || 0, Number(t.at) || 0));
+      }
+      const isDeleted = (e) => del.has(e.id) && del.get(e.id) >= (e.updatedAt || 0);
+      const next = db.entries.filter((e) => !isDeleted(e)).map((e) => Object.assign({}, e));
+      const removed = db.entries.length - next.length;
       const idx = new Map(next.map((e, i) => [e.id, i]));
       let added = 0, updated = 0;
-      for (const e of d.entries) {
+      for (const e of Array.isArray(d.entries) ? d.entries : []) {
         if (!e || !e.id) continue;
+        if (isDeleted(e)) continue; // hier gelöscht: kommt nicht zurück
         const i = idx.get(e.id);
         if (i === undefined) { idx.set(e.id, next.length); next.push(e); added++; } else if ((e.updatedAt || 0) > (next[i].updatedAt || 0)) {
           // Der neuere Eintrag ersetzt den alten ganz. Felder mischen ergab z. B. Anfahrt/Abfahrt,
@@ -772,10 +852,14 @@
         }
       }
       db.entries = next;
+      db.deleted = [...del].map(([id, at]) => ({ id, at }));
       if (await save(before)) {
         if (ensureFieldsForData(meta.settings, db.entries)) persistMeta();
-        toast(`${added} neu, ${updated} aktualisiert.`);
-      }
+        const msg = `${added} neu, ${updated} aktualisiert` + (removed ? `, ${removed} gelöscht` : '') + '.';
+        toast(msg);
+        render();
+        return msg;
+      } else db.deleted = beforeDel;
       render();
     } catch (e) { toast(e.message || String(e)); }
   }
@@ -805,8 +889,9 @@
     try { await loadDb(); } catch {
       dataKey = null; if (errEl) errEl.textContent = 'Bestehende Daten konnten nicht gelesen werden.'; return;
     }
-    afterUnlock();
-    await mergeBackup(file);
+    afterUnlock(true); // Entwurf erst nach dem Zusammenführen öffnen, sonst schließt er dessen Dialoge
+    const msg = await mergeBackup(file);
+    restoreDraft(msg).catch(() => {}); // Ergebnis des Zusammenführens bleibt in der Meldung sichtbar
   }
 
   // Nach "Alles ersetzen" gelten Code und Sicherheitsfragen aus dem Backup, nicht die zuletzt
@@ -851,6 +936,7 @@
       // Unbrauchbare Einträge (z. B. aus einer beschädigten Datei) nicht übernehmen
       if (!Array.isArray(d.entries)) d.entries = [];
       d.entries = d.entries.filter((e) => e && typeof e === 'object' && !Array.isArray(e));
+      fixDb(d);
       // Wurde das Backup mit Code oder Antworten geöffnet, braucht die App ein neues Passwort
       let pwWrap = b.pw;
       if (r.s.kind !== 'pw') {
@@ -884,6 +970,7 @@
         throw new Error('Wiederherstellen fehlgeschlagen (Speicher voll?). Die bisherigen Daten sind unverändert.');
       }
       meta = newMeta;
+      store.del(DRAFT_KEY); // ein Entwurf gehört zu den ersetzten Daten
       dataKey = key; db = d;
       afterUnlock();
       toast(hadPasskey
@@ -945,11 +1032,12 @@
       try {
         dataKey = await C.newDataKey();
         meta = { v: 1, pw: await C.wrapWithPassword(dataKey, p1.value), pk: null, settings: defaultSettings() };
-        db = { entries: [] };
+        db = { entries: [], deleted: [] };
         persistMeta();
         await persistData();
         if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
-        afterUnlock();
+        store.del(DRAFT_KEY); // neue Einrichtung: ein alter Entwurf passt nicht mehr
+        afterUnlock(true);
         const want = await confirmDlg('Mit Face ID entsperren?',
           'Du kannst die App zusätzlich mit einem Passkey (Face ID / Touch ID) öffnen. Das Passwort bleibt als Reserve erhalten.', 'Jetzt einrichten');
         if (want) {
@@ -1603,66 +1691,113 @@
       addMeasInput(true);
       updateAddBtn();
     });
-    const showMeas = isNew ? 1 : Math.max(1, lastFilled(entry) + 1);
+    // Neuer Eintrag: ein Feld. Bearbeiten oder wiederhergestellter Entwurf: alle bis zum letzten ausgefüllten.
+    const showMeas = Math.max(1, lastFilled(entry) + 1);
     for (let i = 0; i < Math.min(showMeas, fields.length); i++) addMeasInput(false);
     updateAddBtn();
 
     const err = h('div', { class: 'err' });
     updateDayHint();
+
+    // Aktueller Stand des Formulars als Eintrag (ohne Prüfung). Grundlage für Speichern, Entwurf und
+    // die Frage "Gibt es ungespeicherte Änderungen?".
+    function collect() {
+      const to = driveTo.get(); const bk = driveBack.get();
+      const driveOut = legacyDrive && to + bk === 0 ? {} : { driveToMin: to, driveBackMin: bk, driveMin: to + bk };
+      return Object.assign({}, entry, {
+        date: date.input.value, customerName: name.input.value.trim(), customerId: cid.input.value.trim(),
+        serial: serial.input.value.trim(), kind: kindSel.value, workMin: work.get(),
+        values: trimValues(measInputs.map((m) => m.inp.value.trim())), note: note.value.trim(),
+      }, driveOut);
+    }
+    const SIG_KEYS = ['date', 'customerName', 'customerId', 'serial', 'kind', 'driveToMin', 'driveBackMin', 'driveMin', 'workMin', 'values', 'note'];
+    const sig = (e) => JSON.stringify(SIG_KEYS.map((k) => (e[k] === undefined ? null : e[k])));
+    // Vergleichsstand: wie der Eintrag beim Öffnen aussah. Ein wiederhergestellter Entwurf gilt immer als geändert.
+    const baseSig = sig(collect());
+    const isDirty = () => !!editing.restored || sig(collect()) !== baseSig;
+    draftCollect = () => (isDirty() ? collect() : null);
+
+    // Vor dem Verlassen: bei Änderungen nachfragen. Liefert true, wenn es weitergehen darf.
+    async function confirmLeave(text) {
+      if (!isDirty()) return true;
+      const ok = await modal((box, close) => {
+        box.append(
+          h('h3', { text: 'Änderungen noch nicht gespeichert' }),
+          h('p', { text }),
+          h('div', { class: 'stack' },
+            h('button', { class: 'btn', type: 'button', onclick: () => close(null), text: 'Weiter bearbeiten' }),
+            h('button', { class: 'btn danger', type: 'button', onclick: () => close(true), text: 'Verwerfen' })));
+      });
+      return !!ok && !!db && view === 'edit'; // inzwischen gesperrt: nichts tun
+    }
+    async function onBack() {
+      if (!await confirmLeave('Wirklich zurückgehen? Die Änderungen an diesem Eintrag gehen verloren.')) return;
+      clearDraft(); editing = null; go(back);
+    }
+
     async function onSave() {
       if (!name.input.value.trim()) { err.textContent = 'Bitte einen Kundennamen eingeben.'; name.input.focus(); return; }
       if (!date.input.value) { err.textContent = 'Bitte ein Datum wählen.'; return; }
       if (kindRequired && !kindSel.value) { err.textContent = 'Bitte die Art des Einsatzes wählen.'; kindSel.focus(); return; }
-      const to = driveTo.get(); const bk = driveBack.get();
-      const driveOut = legacyDrive && to + bk === 0 ? {} : { driveToMin: to, driveBackMin: bk, driveMin: to + bk };
-      const out = Object.assign({}, entry, {
-        date: date.input.value, customerName: name.input.value.trim(), customerId: cid.input.value.trim(),
-        serial: serial.input.value.trim(), kind: kindSel.value, workMin: work.get(),
-        values: trimValues(measInputs.map((m) => m.inp.value.trim())), note: note.value.trim(), updatedAt: Date.now(),
-      }, driveOut);
+      const out = Object.assign(collect(), { updatedAt: Date.now() });
       const before = db.entries.slice();
       const i = db.entries.findIndex((e) => e.id === out.id);
       if (i >= 0) db.entries[i] = out; else db.entries.push(out);
       if (await save(before)) {
-        editing = null;
+        clearDraft();
+        if (!db) return; // inzwischen gesperrt: gespeichert ist es, nichts mehr anzeigen
         if (back === 'calendar') { const p = out.date.split('-'); cal = { y: Number(p[0]), m: Number(p[1]) - 1 }; calDay = out.date; }
-        go(back); toast('Gespeichert.');
+        // Im Eintrag bleiben: Er gilt jetzt als gespeichert (Vergleichsstand neu), raus geht es mit dem Zurück-Pfeil.
+        const y = window.scrollY;
+        editing = { entry: out, isNew: false, back };
+        render(); window.scrollTo(0, y);
+        toast('Gespeichert.');
       }
     }
     async function onDelete() {
       if (!await confirmDlg('Eintrag löschen?', 'Das kann nicht rückgängig gemacht werden.', 'Löschen', true)) return;
       if (!db) return; // inzwischen gesperrt
       const before = db.entries.slice();
+      const beforeDel = db.deleted.slice();
       db.entries = db.entries.filter((e) => e.id !== entry.id);
-      if (await save(before)) { editing = null; go(back); }
+      // merken, damit der Eintrag beim Zusammenführen eines älteren Backups nicht zurückkommt
+      db.deleted = db.deleted.filter((t) => t.id !== entry.id).concat({ id: entry.id, at: Math.max(Date.now(), (entry.updatedAt || 0) + 1) });
+      if (await save(before)) { clearDraft(); editing = null; go(back); } else db.deleted = beforeDel;
     }
-    function onCopy() {
+    async function onCopy() {
+      if (!await confirmLeave('Die Kopie übernimmt nur Kundenname, Kunden-ID und Seriennummer. Die Änderungen an diesem Eintrag gehen verloren.')) return;
       const c = newEntry();
       Object.assign(c, { customerName: name.input.value.trim(), customerId: cid.input.value.trim(), serial: serial.input.value.trim() });
+      clearDraft();
       editing = { entry: c, isNew: true, back };
       go('edit');
       toast('Kopie mit Kundendaten angelegt.');
     }
 
+    const main = h('main', { class: 'wrap' },
+      dl,
+      h('div', { class: 'sect' }, h('h2', { text: 'Auftrag' }), date.el, name.el, h('div', { class: 'row' }, cid.el, serial.el), kindField),
+      h('div', { class: 'sect' }, h('h2', { text: 'Zeiten' }),
+        legacyBox,
+        h('div', { class: 'row' }, driveTo.el, driveBack.el),
+        h('div', { class: 'row' }, work.el, h('div', { class: 'sumbox' }, h('span', { text: 'Fahrzeit gesamt' }), driveSumVal)),
+        dayHint),
+      h('div', { class: 'sect' }, h('h2', { text: 'Messwerte' }), measBox, addMeasBtn),
+      h('div', { class: 'sect' }, h('h2', { text: 'Notiz' }), note),
+      err,
+      h('div', { class: 'footer-actions' },
+        h('button', { class: 'btn', type: 'button', onclick: onSave, text: 'Speichern' })),
+      !isNew && h('div', { class: 'row sec-actions' },
+        h('button', { class: 'btn sec', type: 'button', onclick: onCopy, text: 'Kopie anlegen' }),
+        h('button', { class: 'btn danger', type: 'button', onclick: onDelete, text: 'Löschen' })));
+    // Jede Eingabe (auch Diktieren und Auswahl) schreibt den Entwurf kurz danach mit
+    main.addEventListener('input', scheduleDraft);
+    main.addEventListener('change', scheduleDraft);
+
     root.append(
       header(isNew ? 'Neuer Eintrag' : 'Eintrag bearbeiten',
-        h('button', { class: 'ibtn', type: 'button', 'aria-label': 'Zurück', onclick: () => { editing = null; go(back); } }, icon('back')), null),
-      h('main', { class: 'wrap' },
-        dl,
-        h('div', { class: 'sect' }, h('h2', { text: 'Auftrag' }), date.el, name.el, h('div', { class: 'row' }, cid.el, serial.el), kindField),
-        h('div', { class: 'sect' }, h('h2', { text: 'Zeiten' }),
-          legacyBox,
-          h('div', { class: 'row' }, driveTo.el, driveBack.el),
-          h('div', { class: 'row' }, work.el, h('div', { class: 'sumbox' }, h('span', { text: 'Fahrzeit gesamt' }), driveSumVal)),
-          dayHint),
-        h('div', { class: 'sect' }, h('h2', { text: 'Messwerte' }), measBox, addMeasBtn),
-        h('div', { class: 'sect' }, h('h2', { text: 'Notiz' }), note),
-        err,
-        h('div', { class: 'footer-actions' },
-          h('button', { class: 'btn', type: 'button', onclick: onSave, text: 'Speichern' })),
-        !isNew && h('div', { class: 'row sec-actions' },
-          h('button', { class: 'btn sec', type: 'button', onclick: onCopy, text: 'Kopie anlegen' }),
-          h('button', { class: 'btn danger', type: 'button', onclick: onDelete, text: 'Löschen' }))));
+        h('button', { class: 'ibtn', type: 'button', 'aria-label': 'Zurück', onclick: onBack }, icon('back')), null),
+      main);
   }
 
   function renderSettings() {
@@ -1878,7 +2013,7 @@
             class: 'btn danger', type: 'button', text: 'Alle Daten auf diesem Gerät löschen',
             onclick: async () => {
               if (!await confirmDlg('Wirklich alles löschen?', 'Alle Einträge, das Passwort und der Passkey-Bezug werden von diesem Gerät entfernt. Ohne Backup sind die Daten verloren.', 'Alles löschen', true)) return;
-              store.del(META_KEY); store.del(DATA_KEY);
+              store.del(META_KEY); store.del(DATA_KEY); store.del(DRAFT_KEY);
               meta = null; dataKey = null; db = null; editing = null;
               applyFontSize();
               view = 'setup'; render();

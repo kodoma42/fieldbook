@@ -20,6 +20,11 @@ Erst dann Passwort und Face ID einrichten.
 
 ## Versionen
 
+- **1.6** (08.10.2026): Keine Eingaben mehr verlieren: Zurück-Pfeil und "Kopie anlegen" fragen nach, wenn ein
+  Eintrag geändert, aber nicht gespeichert ist ("Weiter bearbeiten" oder "Verwerfen"). Ein geänderter Eintrag wird
+  laufend verschlüsselt als Entwurf gesichert; sperrt sich die App oder beendet iOS sie im Hintergrund, öffnet sich
+  der Eintrag nach dem Entsperren mit dem letzten Stand. Gelöschte Einträge werden gemerkt und kommen beim
+  Zusammenführen eines älteren Backups nicht mehr zurück. "Speichern" bleibt im Eintrag, zurück geht es mit dem Pfeil.
 - **1.5.5** (07.10.2026): Firmenname in den Einstellungen (steht dann oben statt des App-Namens und auf dem
   Sperrbildschirm; ohne Firmenname steht oben der volle Name "Work Companion Fieldbook"). Reiter "Kunden" und
   "Kalender" lassen sich ausblenden, die Daten bleiben erhalten.

@@ -43,9 +43,10 @@ regelmäßige Backups werden empfohlen.
 - **Face ID / Passkey ist an die Web-Adresse gebunden.** Zieht die App auf eine andere Adresse um,
   muss der Passkey neu eingerichtet werden (die Daten selbst nur per Backup).
 - **Begrenzter Speicher** (ca. 5 MB im Browser), reicht für mehrere tausend Einträge.
-- **Ungespeicherte Eingaben:** Sperrt sich die App automatisch, während ein Eintrag noch nicht
-  gespeichert ist, gehen diese Eingaben verloren. Zurück-Pfeil und Wechsel der Reiter fragen bisher nicht
-  nach (Warnung und Entwurfsspeicherung sind noch geplant).
+- **Ungespeicherte Eingaben:** Ein geänderter, noch nicht gespeicherter Eintrag wird als verschlüsselter
+  Entwurf gesichert (kurz nach jeder Eingabe, beim Verlassen der App und beim Sperren) und nach dem Entsperren
+  wieder geöffnet. Was in den letzten Sekunden vor einem Absturz getippt wurde, kann trotzdem fehlen. Nach dem
+  Entsperren landet man sonst bei der Eintragsliste, nicht auf der zuletzt geöffneten Seite.
 - **Face ID automatisch beim Öffnen** kann auf manchen iPhones von iOS abgelehnt werden (iOS verlangt
   teils eine Berührung vor dem Passkey). Dann erscheint nur der gewohnte Button. Die Funktion lässt sich
   in den Einstellungen ausschalten.
@@ -57,4 +58,4 @@ regelmäßige Backups werden empfohlen.
 - **Getestet** wurde mit automatischen Tests in Chromium und im Alltagstest durch den Ideengeber (läuft noch), nicht
   systematisch auf verschiedenen iPhone-Modellen und iOS-Versionen.
 
-Stand: 07.10.2026
+Stand: 08.10.2026
