@@ -2,9 +2,11 @@
 
 Diese App wurde vollständig mit KI erstellt, die Ideen kamen von einem Menschen. Details und bekannte Grenzen: `KI-HINWEIS.md`.
 
-Verschlüsselte Erfassung von Kunde, Kunden-ID, Datum, Art des Einsatzes (Installation, Wartung, Reparatur),
-Anfahrt, Abfahrt, Arbeitszeit, Seriennummer, bis zu 50 frei benennbaren Messwerten und einer Notiz mit
-einstellbaren Standardtexten. Dazu Kundenansicht, Datumsfilter und ein Kalender mit Spesen-Hinweis.
+Verschlüsselte Erfassung von Kunde, Kunden-ID, Datum, Art des Einsatzes (Installation, Wartung, Reparatur,
+Sonstiges), Geräteart, Anfahrt, Abfahrt, Arbeitszeit, Seriennummer, bis zu 50 frei benennbaren Messwerten mit
+Grenzen je Geräteart, ausgetauschten Teilen, verwendeten eigenen Messgeräten und einer Notiz mit einstellbaren
+Standardtexten. Dazu eine Startseite, Kundenansicht mit Adresse und Kontaktdaten, Datumsfilter und ein Kalender
+mit Spesen-Hinweis.
 Alle Daten bleiben lokal auf dem Gerät, es gibt keinen Server und kein Konto.
 Angezeigt wird "Work Companion Fieldbook", unter dem Icon auf dem Home-Bildschirm kurz "Fieldbook".
 
@@ -20,6 +22,17 @@ Erst dann Passwort und Face ID einrichten.
 
 ## Versionen
 
+- **1.7** (23.10.2026): Startseite nach dem Start der App (Bereiche, Datum, letztes Backup) und Home-Button oben
+  neben dem Sperren; nach dem Sperren geht es an dieselbe Stelle zurück. Einstellungen in Untermenüs (Allgemein,
+  Darstellung, Einträge, Gerätearten, Messgeräte, Sicherheit, Daten). Gerätearten mit eigenen Messfeldern und
+  Unter-/Obergrenzen; Werte außerhalb werden hellrot markiert (gespeichert wird trotzdem), der Eintrag merkt sich die
+  Grenzen vom Tag des Auftrags. Eintrag mit aufklappbaren Abschnitten: ausgetauschte Teile (bei Reparatur), Messwerte
+  (nicht bei Installation) und verwendete eigene Messgeräte (mit Seriennummer und Kalibrierdatum vom Tag des
+  Auftrags). Welche Einsatzart Messwerte und Teile zeigt, ist einstellbar (Einstellungen > Einträge; Standard:
+  Installation ohne Messwerte, Teile nur bei Reparatur). Eigene Einsatzarten (z. B. "Inspektion") mit festem Namen,
+  eigenen Schaltern und Standardtext. Neue Einsatzart "Sonstiges" mit eigenem Text und Schaltern für Einzelfälle. Adresse, Ansprechpartner, Telefon und
+  E-Mail pro Kunde, mit Links zu Karten, Anruf und Mail. CSV mit den neuen Spalten. Ausgeblendete Angaben bleiben
+  gespeichert.
 - **1.6** (08.10.2026): Keine Eingaben mehr verlieren: Zurück-Pfeil und "Kopie anlegen" fragen nach, wenn ein
   Eintrag geändert, aber nicht gespeichert ist ("Weiter bearbeiten" oder "Verwerfen"). Ein geänderter Eintrag wird
   laufend verschlüsselt als Entwurf gesichert; sperrt sich die App oder beendet iOS sie im Hintergrund, öffnet sich

@@ -45,8 +45,14 @@ regelmäßige Backups werden empfohlen.
 - **Begrenzter Speicher** (ca. 5 MB im Browser), reicht für mehrere tausend Einträge.
 - **Ungespeicherte Eingaben:** Ein geänderter, noch nicht gespeicherter Eintrag wird als verschlüsselter
   Entwurf gesichert (kurz nach jeder Eingabe, beim Verlassen der App und beim Sperren) und nach dem Entsperren
-  wieder geöffnet. Was in den letzten Sekunden vor einem Absturz getippt wurde, kann trotzdem fehlen. Nach dem
-  Entsperren landet man sonst bei der Eintragsliste, nicht auf der zuletzt geöffneten Seite.
+  wieder geöffnet. Was in den letzten Sekunden vor einem Absturz getippt wurde, kann trotzdem fehlen. Die Rückkehr an
+  die zuletzt geöffnete Seite nach dem Sperren klappt nur, solange iOS die App im Hintergrund nicht beendet hat;
+  sonst kommt die Startseite (ein Entwurf öffnet sich trotzdem).
+- **Kontaktdaten der Kunden** (Adresse, Telefon, E-Mail) sind verschlüsselt gespeichert, stehen aber lesbar im
+  CSV-Export. Die Karten-Links öffnen Apple Karten über maps.apple.com; dabei geht die Adresse an Apple.
+- **Messwert-Grenzen** sind nur ein Hinweis (Farbe und Text), keine Prüfung und keine Sperre. Die App warnt nicht bei
+  abgelaufener Kalibrierung der eigenen Messgeräte; sie zeigt nur das eingetragene Datum.
+- **Gerätearten und ihre Grenzen** gehören zu den Einstellungen und sind deshalb ebenfalls nicht verschlüsselt.
 - **Face ID automatisch beim Öffnen** kann auf manchen iPhones von iOS abgelehnt werden (iOS verlangt
   teils eine Berührung vor dem Passkey). Dann erscheint nur der gewohnte Button. Die Funktion lässt sich
   in den Einstellungen ausschalten.
@@ -58,4 +64,4 @@ regelmäßige Backups werden empfohlen.
 - **Getestet** wurde mit automatischen Tests in Chromium und im Alltagstest durch den Ideengeber (läuft noch), nicht
   systematisch auf verschiedenen iPhone-Modellen und iOS-Versionen.
 
-Stand: 08.10.2026
+Stand: 23.10.2026
