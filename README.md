@@ -22,6 +22,10 @@ Erst dann Passwort und Face ID einrichten.
 
 ## Versionen
 
+- **1.8.1** (02.11.2026): Der Knopf zur Startseite ist einstellbar (Einstellungen > Darstellung): schwebend unten
+  links (Standard, Farbe Orange, Hellblau oder Weiß, beim Runterscrollen ausblendbar), als Reiter "Start" in der Leiste
+  (in der gewählten Farbe leicht hervorgehoben) oder wie bisher oben in der Kopfzeile. Der gerade geöffnete Reiter
+  ist leicht farbig hinterlegt.
 - **1.8** (02.11.2026): Geräte pro Kunde (Bezeichnung, Seriennummer, Geräteart) in der Kundenansicht; im Eintrag
   lässt sich das Gerät auswählen, Seriennummer und Geräteart werden eingetragen; neue Seriennummern lassen sich direkt
   als Gerät speichern. Notizen auf der Startseite zum Abhaken (mit "Rückgängig"), automatisch und verschlüsselt

@@ -4,7 +4,7 @@
   const META_KEY = 'mp_meta_v1';
   const DATA_KEY = 'mp_data_v1';
   const DRAFT_KEY = 'mp_draft_v1'; // verschlüsselter Entwurf eines noch nicht gespeicherten Eintrags
-  const APP_VERSION = '1.8';
+  const APP_VERSION = '1.8.1';
   const root = document.getElementById('app');
 
   /* ------------------------------------------------------------------ */
@@ -427,6 +427,8 @@
     autoPasskey: true, // Face ID beim Öffnen automatisch starten (wenn ein Passkey eingerichtet ist)
     company: '', // Firmenname: ersetzt den App-Namen in der Kopfzeile, steht auf dem Sperrbildschirm (unverschlüsselt)
     hiddenTabs: [], // ausgeblendete Reiter: 'customers' und/oder 'calendar'
+    // Knopf zur Startseite: 'float' (schwebend unten links), 'tab' (Reiter "Start"), 'top' (oben in der Kopfzeile)
+    homeBtn: { pos: 'float', color: 'orange', hide: true },
     templates: defaultTemplates(),
     customKinds: [], // eigene Einsatzarten: { id: 'c:…', name, meas, parts, template }
     kindShow: defaultKindShow(), // je Einsatzart: Messwerte (mit Messgeräten) und ausgetauschte Teile zeigen?
@@ -472,6 +474,12 @@
   function fixLook(s) {
     s.company = Array.from(String(s.company || '').replace(/\s+/g, ' ').trim()).slice(0, 60).join('').trim(); // nach Zeichen kürzen, nicht mitten im Emoji
     s.hiddenTabs = Array.isArray(s.hiddenTabs) ? [...new Set(s.hiddenTabs.filter((t) => t === 'customers' || t === 'calendar'))] : [];
+    const hb = s.homeBtn && typeof s.homeBtn === 'object' ? s.homeBtn : {};
+    s.homeBtn = {
+      pos: ['float', 'tab', 'top'].includes(hb.pos) ? hb.pos : 'float',
+      color: ['orange', 'blue', 'white'].includes(hb.color) ? hb.color : 'orange',
+      hide: hb.hide !== false,
+    };
   }
   const companyName = () => (meta && meta.settings && meta.settings.company) || '';
   const tabHidden = (t) => !!(meta && meta.settings && meta.settings.hiddenTabs.includes(t));
@@ -1185,6 +1193,7 @@
     root.classList.remove('enter');
     if (key !== lastKey) { void root.offsetWidth; root.classList.add('enter'); }
     lastKey = key;
+    hfAcc = 0; hfY = 0;
     const fn = {
       setup: renderSetup, lock: renderLock, home: renderHome, list: renderList, edit: renderEdit, settings: renderSettings,
       customers: renderCustomers, customer: renderCustomer, calendar: renderCalendar,
@@ -1372,10 +1381,14 @@
   ];
   const tabOf = (v) => (v === 'customer' ? 'customers' : v);
 
+  const homePos = () => (meta && meta.settings && meta.settings.homeBtn ? meta.settings.homeBtn.pos : 'float');
   function tabbar() {
     const cur = tabOf(view);
-    return h('nav', { class: 'tabs', 'aria-label': 'Hauptmenü' }, TABS.filter(([v]) => !tabHidden(v)).map(([v, label, ic]) => h('button', {
-      class: 'tab', type: 'button', 'aria-current': v === cur ? 'page' : null,
+    const tabs = (homePos() === 'tab' ? [['home', 'Start', 'home']] : []).concat(TABS.filter(([v]) => !tabHidden(v)));
+    const hc = meta && meta.settings && meta.settings.homeBtn ? meta.settings.homeBtn.color : 'orange';
+    return h('nav', { class: 'tabs', 'aria-label': 'Hauptmenü' }, tabs.map(([v, label, ic]) => h('button', {
+      // Der Reiter "Start" ist in der gewählten Farbe leicht hervorgehoben
+      class: v === 'home' ? 'tab tab-home c-' + hc : 'tab', type: 'button', 'aria-current': v === cur ? 'page' : null,
       onclick: () => { if (v === 'customers') selCustomer = null; if (v === 'settings') settingsSub = null; go(v); },
     }, icon(ic), h('span', { text: label }))));
   }
@@ -1383,7 +1396,35 @@
   const lockBtn = () => iconBtn('lock', 'Sperren', lock);
   const goHome = () => { selCustomer = null; settingsSub = null; go('home'); };
   // Rechts in der Kopfzeile: Startseite und Sperren
-  const topRight = (onHome) => [iconBtn('home', 'Startseite', onHome || goHome), lockBtn()];
+  // Oben nur dann ein Haus, wenn der Knopf dort sitzen soll (oder im Eintrag, wenn es keine schwebende Variante gibt:
+  // dort fehlt die Reiterleiste)
+  const topRight = (onHome) => [
+    (homePos() === 'top' || (homePos() === 'tab' && view === 'edit')) && iconBtn('home', 'Startseite', onHome || goHome),
+    lockBtn()];
+  // Schwebender Knopf zur Startseite (unten links); onHome z. B. mit Rückfrage im Eintrag
+  function homeFab(onHome) {
+    if (homePos() !== 'float' || view === 'home') return null;
+    const c = meta.settings.homeBtn.color;
+    return h('button', { class: 'hfab c-' + c + (view === 'edit' ? ' onedit' : ''), id: 'homefab', type: 'button', 'aria-label': 'Startseite', onclick: onHome || goHome }, icon('home'));
+  }
+  // Beim Runterscrollen ausblenden: erst nach 30 px am Stück weg, nach 80 px nach oben wieder da; ganz oben immer sichtbar.
+  // Das Nachfedern am Seitenrand (iPhone) zählt nicht.
+  let hfY = 0, hfAcc = 0, hfTick = false;
+  function homeFabScroll() {
+    hfTick = false;
+    const b = document.getElementById('homefab');
+    const max = document.documentElement.scrollHeight - innerHeight;
+    const y = Math.min(Math.max(scrollY, 0), Math.max(max, 0));
+    const dy = y - hfY; hfY = y;
+    if (!b || !meta || !meta.settings.homeBtn.hide) return;
+    if (y < 40) { hfAcc = 0; b.classList.remove('gone'); return; }
+    if (y >= max - 2 && dy <= 0) return;
+    if ((dy > 0 && hfAcc < 0) || (dy < 0 && hfAcc > 0)) hfAcc = 0;
+    hfAcc += dy;
+    if (hfAcc > 30) b.classList.add('gone');
+    else if (hfAcc < -80) b.classList.remove('gone');
+  }
+  addEventListener('scroll', () => { if (!hfTick) { hfTick = true; requestAnimationFrame(homeFabScroll); } }, { passive: true });
 
   // Gesamtzeit (Fahrt + Arbeit) pro Datum über alle Einträge: Grundlage für Spesen und Kalender
   function dayTotals() {
@@ -1531,6 +1572,7 @@
         class: 'fab', type: 'button', 'aria-label': 'Neuer Eintrag',
         onclick: () => { editing = { entry: newEntry(), isNew: true, back: 'list' }; go('edit'); },
       }, icon('plus'), 'Neu'),
+      homeFab(),
       tabbar());
     fill();
   }
@@ -1817,6 +1859,7 @@
     root.append(
       header('Kunden', null, topRight()),
       h('main', { class: 'wrap' }, input, bodyEl),
+      homeFab(),
       tabbar());
     fill();
   }
@@ -1915,6 +1958,7 @@
         usable.length ? h('div', { class: 'sect' }, h('h2', { text: 'Verlauf eines Messwerts' }), sel, histEl) : null,
         h('div', { class: 'day', text: 'Alle Einträge' }),
         g.entries.map((e) => entryCard(e, 'customer', totals))),
+      homeFab(),
       tabbar());
     if (usable.length) drawHist(usable[0].i);
   }
@@ -2006,6 +2050,7 @@
           ' ' + (k[0] === 'sonstiges' && meta.settings.customKinds.length ? 'Sonstiges und eigene Arten' : k[1])))),
         h('div', { class: 'muted small', style: 'margin:8px 2px 0', text: 'Violett hinterlegt: Tage, an denen Fahrzeit plus Arbeitszeit über der Spesen-Grenze liegt. Die Grenze stellst du in den Einstellungen ein. Die Punkte oben rechts zeigen die Einsatzarten des Tages.' }),
         panelEl),
+      homeFab(),
       tabbar());
     paint();
   }
@@ -2558,7 +2603,7 @@
     root.append(
       header(isNew ? 'Neuer Eintrag' : 'Eintrag bearbeiten',
         h('button', { class: 'ibtn', type: 'button', 'aria-label': 'Zurück', onclick: onBack }, icon('back')), topRight(onHome)),
-      main);
+      main, homeFab(onHome));
   }
 
   /* ---- Einstellungen: Übersicht mit Untermenüs ---- */
@@ -2591,6 +2636,7 @@
           h('span', { class: 'subtext' }, h('span', { class: 'subtitle', text: label }), h('span', { class: 'muted small', text: subSummary(k) })),
           icon('next')))),
           h('p', { class: 'muted small', style: 'text-align:center;margin-top:18px', text: 'Work Companion Fieldbook ' + APP_VERSION + ' · Daten bleiben lokal auf diesem Gerät' })),
+        homeFab(),
         tabbar());
       return;
     }
@@ -2602,6 +2648,7 @@
     root.append(
       header(label, h('button', { class: 'ibtn', type: 'button', 'aria-label': 'Zurück zu den Einstellungen', onclick: () => { settingsSub = null; go('settings'); } }, icon('back')), topRight()),
       h('main', { class: 'wrap' }, body),
+      homeFab(),
       tabbar());
   }
 
@@ -2644,7 +2691,30 @@
           const nav = document.querySelector('nav.tabs'); if (nav) nav.replaceWith(tabbar());
         },
       }));
+    const hb = s.homeBtn;
+    const hbPos = h('select', {
+      'aria-label': 'Platz des Startseiten-Knopfs',
+      onchange: (e) => { hb.pos = e.target.value; fixLook(s); persistMeta(); render(); toast('Gespeichert.'); },
+    }, [['float', 'Schwebend unten links'], ['tab', 'Als Reiter „Start“ in der Leiste'], ['top', 'Oben in der Kopfzeile']]
+      .map(([v, t]) => h('option', { value: v, text: t, selected: hb.pos === v })));
+    const hbColor = h('div', { class: 'seg', role: 'group', 'aria-label': 'Farbe des Knopfs' },
+      [['orange', 'Orange'], ['blue', 'Hellblau'], ['white', 'Weiß']].map(([v, t]) => h('button', {
+        class: 'segbtn', type: 'button', 'aria-pressed': hb.color === v ? 'true' : 'false',
+        onclick: () => { hb.color = v; fixLook(s); persistMeta(); render(); toast('Gespeichert.'); },
+      }, h('i', { class: 'swatch c-' + v, 'aria-hidden': 'true' }), t)));
+    const hbHide = h('label', { class: 'setrow switchrow' },
+      h('div', {}, h('div', { text: 'Beim Runterscrollen ausblenden' }),
+        h('div', { class: 'muted small', text: 'Kommt beim Hochscrollen wieder; ganz oben ist er immer da.' })),
+      h('input', {
+        type: 'checkbox', class: 'switch', checked: hb.hide, 'aria-label': 'Knopf beim Runterscrollen ausblenden',
+        onchange: (e) => { hb.hide = e.target.checked; persistMeta(); toast('Gespeichert.'); const b = document.getElementById('homefab'); if (b && !hb.hide) b.classList.remove('gone'); },
+      }));
     return [
+      h('div', { class: 'sect' }, h('h2', { text: 'Knopf zur Startseite' }),
+        h('label', { class: 'f' }, h('span', { text: 'Wo soll er sitzen?' }), hbPos),
+        hb.pos !== 'top' && h('div', { class: 'f' }, h('span', { class: 'flabel', text: 'Farbe' }), hbColor),
+        hb.pos === 'float' && hbHide,
+        h('p', { class: 'muted small', style: 'margin:8px 0 0', text: hb.pos === 'tab' ? 'Der Reiter „Start“ ist in dieser Farbe leicht hervorgehoben. Im Eintrag gibt es keine Reiterleiste, dort sitzt das Haus oben in der Kopfzeile.' : hb.pos === 'float' ? 'Im Eintrag schwebt er über dem Speichern-Knopf.' : 'Das Haus sitzt oben neben dem Schloss.' })),
       h('div', { class: 'sect' }, h('h2', { text: 'Schrift' }),
         h('label', { class: 'f', style: 'margin:0' }, h('span', { text: 'Schriftgröße' }), fsSel),
         h('p', { class: 'muted small', style: 'margin:8px 0 0', text: 'Groß hilft draußen bei Sonne oder mit Handschuhen. Es gilt für die ganze App.' })),

@@ -30,6 +30,7 @@
   --kr:#0b6b66; --kr-dot:#0c9484;  /* Reparatur: türkis */
   --ks:#3f4956; --ks-dot:#7d8898;  /* Sonstiges: neutrales Grau */
   --oor-bg:#fde8e8; --oor-edge:#c62828; --oor-ink:#8e1b1b; /* Messwert außerhalb der Grenzen: helles Rot */
+  --h-orange:#e8730c; --h-orange-ink:#ffffff; --h-orange-tab:#b45309; --h-blue:#0b6bcb; --h-blue-ink:#ffffff; --h-white:#ffffff; --h-white-ink:#0b2a4a; /* schwebender Startseiten-Knopf */
   --chip:#e8edf3; --shadow:0 1px 2px rgba(16,24,40,.08),0 1px 3px rgba(16,24,40,.10);
   --r:14px; /* einheitlicher Eckenradius für Karten und Felder */
 }
@@ -43,6 +44,7 @@
     --ki:#7cc8ff; --ki-dot:#4db8ff; --kw:#ffb066; --kw-dot:#ff9a3d; --kr:#5ddbd0; --kr-dot:#2dd4bf;
     --ks:#c3ccd6; --ks-dot:#9aa7b5;
     --oor-bg:#3a1616; --oor-edge:#ef6b6b; --oor-ink:#ffc9c9;
+    --h-orange:#ff9a3d; --h-orange-ink:#1a0c00; --h-orange-tab:#ffa552; --h-blue:#5aa6ff; --h-blue-ink:#06121f; --h-white:#222c38; --h-white-ink:#a9ccf5;
     --chip:#222c38; --shadow:none;
   }
 }
@@ -337,6 +339,34 @@ a.clink .ico{color:var(--accent)}
 .cardline{display:flex;align-items:center;gap:6px;margin-top:6px;font-size:calc(13px*var(--fs));color:var(--muted);overflow:hidden;text-overflow:ellipsis}
 .cardline .ico{width:16px;height:16px;flex:none}
 [hidden]{display:none!important}
+/* Schwebender Knopf zur Startseite (seit 1.8.1), unten links gegenüber von "+ Neu" */
+.hfab{position:fixed;left:max(16px,env(safe-area-inset-left));bottom:calc(env(safe-area-inset-bottom) + 70px);z-index:7;
+  width:58px;height:58px;border-radius:50%;border:0;display:flex;align-items:center;justify-content:center;cursor:pointer;
+  background:var(--hb);color:var(--hi);box-shadow:0 6px 18px rgba(8,24,44,.38);transition:transform .2s ease-out,opacity .2s ease-out}
+.hfab .ico{width:26px;height:26px}
+.hfab.onedit{bottom:calc(env(safe-area-inset-bottom) + 86px)}
+.hfab.gone{transform:translateY(130px);opacity:0;pointer-events:none}
+.hfab:active{filter:brightness(.92)}
+.c-orange{--hb:var(--h-orange);--hi:var(--h-orange-ink)}
+.c-blue{--hb:var(--h-blue);--hi:var(--h-blue-ink)}
+.c-white{--hb:var(--h-white);--hi:var(--h-white-ink)}
+/* Aktueller Reiter: leicht hinterlegt (seit 1.8.1) */
+.tab{position:relative}
+.tab[aria-current=page]::before{content:"";position:absolute;inset:5px 4px;border-radius:12px;background:color-mix(in srgb,var(--accent) 15%,transparent);z-index:-1}
+/* Reiter "Start": leicht hervorgehoben in der gewählten Farbe (bei Weiß im Marineblau der App) */
+.tab.tab-home{position:relative;color:var(--hk)}
+.tab.tab-home::before{content:"";position:absolute;inset:5px 4px;border-radius:12px;background:color-mix(in srgb,var(--hk) 14%,transparent);z-index:-1}
+.tab.tab-home[aria-current=page]::before{background:color-mix(in srgb,var(--hk) 26%,transparent)}
+.tab.tab-home[aria-current=page]{color:var(--hk)}
+.tab.tab-home.c-orange{--hk:var(--h-orange-tab)}
+.tab.tab-home.c-blue{--hk:var(--accent)}
+.tab.tab-home.c-white{--hk:var(--head)}
+.tabs{isolation:isolate}
+.hfab.c-white{box-shadow:0 6px 18px rgba(8,24,44,.32),0 0 0 1.5px var(--line)}
+.seg{display:flex;flex-wrap:wrap;gap:8px}
+.segbtn{display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:8px 14px;border:1.5px solid var(--edge);border-radius:999px;background:var(--card);font-weight:600;cursor:pointer}
+.segbtn[aria-pressed=true]{border-color:var(--accent);outline:2px solid var(--accent);outline-offset:0}
+.swatch{display:inline-block;width:16px;height:16px;border-radius:50%;background:var(--hb);box-shadow:0 0 0 1px var(--line)}
 /* Kleine Animationen (seit 1.8), sparsam; aus bei "Bewegung reduzieren" */
 @keyframes fb-in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 @keyframes fb-up{from{opacity:.5;transform:translateY(28px)}to{opacity:1;transform:none}}
