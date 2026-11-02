@@ -4,7 +4,7 @@
   const META_KEY = 'mp_meta_v1';
   const DATA_KEY = 'mp_data_v1';
   const DRAFT_KEY = 'mp_draft_v1'; // verschlüsselter Entwurf eines noch nicht gespeicherten Eintrags
-  const APP_VERSION = '1.7';
+  const APP_VERSION = '1.8';
   const root = document.getElementById('app');
 
   /* ------------------------------------------------------------------ */
@@ -563,6 +563,15 @@
         contacts: (Array.isArray(x.contacts) ? x.contacts : []).filter(isObj).slice(0, 10).map((c) => ({ phone: str(c.phone, 40), person: str(c.person, 80) })),
         updatedAt: Number(x.updatedAt) || 0,
       }));
+    // Geräte der Kunden (seit 1.8): { id, cid, name (Kunde), label, serial, deviceType, deviceTypeName, updatedAt }
+    d.devices = (Array.isArray(d.devices) ? d.devices : []).filter((x) => isObj(x) && typeof x.id === 'string')
+      .map((x) => ({
+        id: x.id, cid: str(x.cid, 60), name: str(x.name, 120), label: str(x.label, 80), serial: str(x.serial, 60),
+        deviceType: str(x.deviceType, 60), deviceTypeName: str(x.deviceTypeName, 40), updatedAt: Number(x.updatedAt) || 0,
+      }));
+    // Allgemeine Notizen auf der Startseite (seit 1.8): { id, text, createdAt, updatedAt }
+    d.notes = (Array.isArray(d.notes) ? d.notes : []).filter((x) => isObj(x) && typeof x.id === 'string')
+      .map((x) => ({ id: x.id, text: str(x.text, 2000), createdAt: Number(x.createdAt) || 0, updatedAt: Number(x.updatedAt) || 0 }));
     return d;
   }
 
@@ -626,6 +635,7 @@
 
   function lock() {
     stashDraft(); // offenen Eintrag sichern, bevor alles aus dem Speicher genommen wird
+    flushNotes(); // gerade getippte Notiz sichern
     // Stelle merken, damit das Entsperren dorthin zurückführt (nicht zur Startseite). Vom Eintrag nur die ID.
     if (dataKey && view !== 'lock' && view !== 'setup') {
       resume = {
@@ -680,6 +690,7 @@
     const min = meta.settings.lockMin;
     if (document.hidden) {
       stashDraft(); // iOS kann die App im Hintergrund jederzeit beenden
+      flushNotes();
       hiddenAt = Date.now();
       if (min === 0 && !suspendLock) lock();
     } else {
@@ -968,7 +979,7 @@
         }
       }
       // Messgeräte und Kontaktdaten: je ID gewinnt der neuere Stand; gelöschte Messgeräte kommen nicht zurück
-      const beforeInst = db.instruments; const beforeCust = db.customers;
+      const beforeInst = db.instruments; const beforeCust = db.customers; const beforeDev = db.devices; const beforeNotes = db.notes;
       const dd = fixDb(Object.assign({}, d, { entries: [] }));
       const mergeById = (mine, theirs) => {
         const out = mine.filter((x) => !(del.has(x.id) && del.get(x.id) >= (x.updatedAt || 0))).map((x) => Object.assign({}, x));
@@ -982,6 +993,8 @@
       };
       db.instruments = mergeById(db.instruments, dd.instruments);
       db.customers = mergeById(db.customers, dd.customers);
+      db.devices = mergeById(db.devices, dd.devices);
+      db.notes = mergeById(db.notes, dd.notes);
       db.entries = next;
       db.deleted = [...del].map(([id, at]) => ({ id, at }));
       if (await save(before)) {
@@ -990,7 +1003,7 @@
         toast(msg);
         render();
         return msg;
-      } else { db.deleted = beforeDel; db.instruments = beforeInst; db.customers = beforeCust; }
+      } else { db.deleted = beforeDel; db.instruments = beforeInst; db.customers = beforeCust; db.devices = beforeDev; db.notes = beforeNotes; }
       render();
     } catch (e) { toast(e.message || String(e)); }
   }
@@ -1160,12 +1173,18 @@
   /* ------------------------------------------------------------------ */
   /* Ansichten                                                           */
   /* ------------------------------------------------------------------ */
+  let lastKey = '';
   function render() {
     // Ausgeblendeter Reiter (z. B. nach dem Einspielen eines Backups): zurück zu den Einträgen
     const tabView = view === 'customer' ? 'customers' : view;
     if ((tabView === 'customers' || tabView === 'calendar') && tabHidden(tabView)) view = 'home';
     root.replaceChildren();
     document.querySelectorAll('.overlay').forEach((o) => o.remove());
+    // Sanftes Einblenden nur beim Wechsel der Seite, nicht bei jedem Neuzeichnen
+    const key = view + ':' + (view === 'settings' ? settingsSub || '' : view === 'customer' ? selCustomer || '' : '');
+    root.classList.remove('enter');
+    if (key !== lastKey) { void root.offsetWidth; root.classList.add('enter'); }
+    lastKey = key;
     const fn = {
       setup: renderSetup, lock: renderLock, home: renderHome, list: renderList, edit: renderEdit, settings: renderSettings,
       customers: renderCustomers, customer: renderCustomer, calendar: renderCalendar,
@@ -1451,6 +1470,7 @@
           const all = [['list', 'Einträge', 'list'], ['customers', 'Kunden', 'users'], ['calendar', 'Kalender', 'cal'], ['settings', 'Einstellungen', 'settings']].filter(([v]) => !tabHidden(v));
           return all.map(([v, l, ic], i) => tile(v, l, ic, all.length % 2 === 1 && i === all.length - 1));
         })()),
+        notesSection(),
         backupCard),
       tabbar());
   }
@@ -1608,16 +1628,166 @@
     return true;
   }
 
+  /* ---- Geräte der Kunden (seit 1.8) ---- */
+  // Zuordnung wie bei den Kontaktdaten: über die Kunden-ID, sonst über den Namen (wenn eine Seite keine ID hat)
+  function devicesFor(name, cid) {
+    if (!db || !db.devices) return [];
+    const n = String(name || '').trim().toLowerCase();
+    const c = String(cid || '').trim().toLowerCase();
+    return db.devices.filter((x) => (c && x.cid && x.cid.toLowerCase() === c) || (n && (!x.cid || !c) && x.name.trim().toLowerCase() === n))
+      .sort((a, b) => (a.label || a.serial).localeCompare(b.label || b.serial, 'de'));
+  }
+  const deviceTitle = (x) => [x.label, x.serial && 'SN ' + x.serial].filter(Boolean).join(' · ') || '(ohne Angaben)';
+  const typeNameOf = (x) => ((meta.settings.deviceTypes.find((t) => t.id === x.deviceType) || {}).name) || x.deviceTypeName || '';
+  // Gerät anlegen oder bearbeiten. Liefert das gespeicherte Gerät, 'new-entry' (mit Gerät) oder null.
+  async function editDevice(name, cid, dev, preset) {
+    const types = meta.settings.deviceTypes;
+    const r = await modal((box, close) => {
+      const lab = h('input', { type: 'text', value: dev ? dev.label : (preset && preset.label) || '', maxlength: '80', autocomplete: 'off', autocapitalize: 'sentences', placeholder: 'z. B. Kältesatz KS-200' });
+      const sn = h('input', { type: 'text', value: dev ? dev.serial : (preset && preset.serial) || '', maxlength: '60', autocomplete: 'off', autocapitalize: 'characters' });
+      const cur = dev ? dev.deviceType : (preset && preset.deviceType) || '';
+      const ty = h('select', { 'aria-label': 'Geräteart' },
+        h('option', { value: '', text: '– keine –' }),
+        types.map((t) => h('option', { value: t.id, text: t.name, selected: t.id === cur })),
+        cur && !types.some((t) => t.id === cur) && h('option', { value: cur, selected: true, text: ((dev || preset || {}).deviceTypeName || 'Geräteart') + ' (nicht mehr in der Liste)' }));
+      const err = h('div', { class: 'err' });
+      const val = () => {
+        const v = { label: lab.value.replace(/\s+/g, ' ').trim(), serial: sn.value.trim(), deviceType: ty.value };
+        if (!v.label && !v.serial) { err.textContent = 'Bitte Bezeichnung oder Seriennummer eingeben.'; lab.focus(); return null; }
+        if (v.serial && devicesFor(name, cid).some((x) => (!dev || x.id !== dev.id) && x.serial.toLowerCase() === v.serial.toLowerCase())) {
+          err.textContent = 'Ein Gerät mit dieser Seriennummer gibt es bei diesem Kunden schon.'; sn.focus(); return null;
+        }
+        return v;
+      };
+      box.append(
+        h('h3', { text: dev ? 'Gerät bearbeiten' : 'Neues Gerät' }),
+        h('p', { class: 'muted small', text: (name || cid || 'Kunde') + '. Im Eintrag wählst du das Gerät aus; Seriennummer und Geräteart werden dann eingetragen.' }),
+        h('label', { class: 'f' }, h('span', { text: 'Bezeichnung (optional)' }), lab),
+        h('label', { class: 'f' }, h('span', { text: 'Seriennummer' }), sn),
+        types.length || cur ? h('label', { class: 'f' }, h('span', { text: 'Geräteart' }), ty) : null,
+        err,
+        h('div', { class: 'stack', style: 'margin-top:6px' },
+          h('button', { class: 'btn', type: 'button', text: 'Speichern', onclick: () => { const v = val(); if (v) close(v); } }),
+          dev && h('button', { class: 'btn sec', type: 'button', text: 'Neuer Eintrag für dieses Gerät', onclick: () => { const v = val(); if (v) close(Object.assign(v, { newEntry: true })); } }),
+          dev && h('button', { class: 'btn danger', type: 'button', text: 'Gerät löschen', onclick: () => close('delete') }),
+          h('button', { class: 'btn link', type: 'button', text: 'Abbrechen', onclick: () => close(null) })));
+      if (!dev) setTimeout(() => (lab.value ? sn : lab).focus(), 50);
+    });
+    if (!r || !db) return null;
+    const before = db.devices; const beforeDel = db.deleted.slice();
+    const now = Date.now();
+    if (r === 'delete') {
+      if (!await confirmDlg('Gerät löschen?', `„${deviceTitle(dev)}“ wird aus der Liste des Kunden entfernt. Einträge behalten ihre Seriennummer.`, 'Löschen', true)) return null;
+      if (!db) return null;
+      db.devices = db.devices.filter((x) => x.id !== dev.id);
+      db.deleted = db.deleted.filter((t) => t.id !== dev.id).concat({ id: dev.id, at: Math.max(now, (dev.updatedAt || 0) + 1) });
+      if (!await save(db.entries.slice())) { db.devices = before; db.deleted = beforeDel; return null; }
+      toast('Gerät gelöscht.');
+      return null;
+    }
+    const t = meta.settings.deviceTypes.find((x) => x.id === r.deviceType);
+    const rec = fixDb({ devices: [Object.assign({}, dev || { id: uid() }, {
+      cid: String(cid || '').trim(), name: String(name || '').trim(), label: r.label, serial: r.serial,
+      deviceType: r.deviceType, deviceTypeName: t ? t.name : (dev && dev.deviceType === r.deviceType ? dev.deviceTypeName : ''), updatedAt: now,
+    })] }).devices[0];
+    db.devices = db.devices.filter((x) => x.id !== rec.id).concat(rec);
+    if (!await save(db.entries.slice())) { db.devices = before; return null; }
+    toast('Gerät gespeichert.');
+    return r.newEntry ? Object.assign({ newEntry: true }, rec) : rec;
+  }
+  // Neuer Eintrag mit Kunde, Gerät (Seriennummer) und Geräteart
+  function entryForDevice(name, cid, dev, back) {
+    const e = newEntry();
+    e.customerName = name || ''; e.customerId = cid || '';
+    if (dev) { e.serial = dev.serial; e.deviceType = dev.deviceType; e.deviceTypeName = typeNameOf(dev); }
+    editing = { entry: e, isNew: true, back }; go('edit');
+  }
+
+  /* ---- Allgemeine Notizen (Startseite, seit 1.8) ---- */
+  let notesTimer = null;
+  function scheduleNotes() { clearTimeout(notesTimer); notesTimer = setTimeout(() => { notesTimer = null; if (db) save(db.entries.slice()); }, 500); }
+  // Vor dem Sperren oder beim Verlassen der App: eine gerade getippte Notiz sofort sichern
+  function flushNotes() {
+    if (!notesTimer) return;
+    clearTimeout(notesTimer); notesTimer = null;
+    if (db && dataKey) persistData().catch(() => {});
+  }
+  // Meldung mit Knopf (z. B. "Rückgängig")
+  function toastAction(msg, label, fn) {
+    document.querySelectorAll('.toast').forEach((t) => t.remove());
+    const t = h('div', { class: 'toast act', role: 'status' }, h('span', { text: msg }),
+      h('button', { class: 'toast-btn', type: 'button', text: label, onclick: () => { t.remove(); fn(); } }));
+    document.body.append(t);
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => t.remove(), 6000);
+  }
+  const growTa = (ta) => { ta.style.height = 'auto'; ta.style.height = Math.max(ta.scrollHeight, 44) + 'px'; };
+  function notesSection() {
+    const list = h('div', { class: 'notelist' });
+    const addBtn = h('button', { class: 'btn link note-add', type: 'button', text: '+ Notiz' });
+    function row(note) {
+      const r = { note };
+      const ta = h('textarea', { class: 'note-ta', rows: '1', value: note ? note.text : '', placeholder: 'Notiz …', 'aria-label': 'Notiz', autocapitalize: 'sentences' });
+      const cb = h('button', { class: 'note-check', type: 'button', 'aria-label': 'Erledigt' });
+      const el = h('div', { class: 'note' }, cb, ta);
+      ta.addEventListener('input', () => {
+        growTa(ta);
+        const text = ta.value.slice(0, 2000);
+        if (!r.note) {
+          if (!text.trim()) return;
+          r.note = { id: uid(), text, createdAt: Date.now(), updatedAt: Date.now() };
+          db.notes.push(r.note);
+        } else { r.note.text = text; r.note.updatedAt = Date.now(); }
+        scheduleNotes();
+      });
+      // Leer gemachte Notiz beim Verlassen entfernen (eine leere Notiz wird nicht gespeichert)
+      ta.addEventListener('blur', () => {
+        if (!r.note || ta.value.trim() || !db) return;
+        db.notes = db.notes.filter((x) => x.id !== r.note.id);
+        db.deleted = db.deleted.filter((t) => t.id !== r.note.id).concat({ id: r.note.id, at: Date.now() });
+        r.note = null; scheduleNotes();
+      });
+      cb.addEventListener('click', () => {
+        if (!r.note) { ta.focus(); return; }
+        const n = r.note;
+        el.classList.add('done');
+        db.notes = db.notes.filter((x) => x.id !== n.id);
+        db.deleted = db.deleted.filter((t) => t.id !== n.id).concat({ id: n.id, at: Math.max(Date.now(), n.updatedAt + 1) });
+        scheduleNotes();
+        setTimeout(() => { el.remove(); if (!list.children.length) list.append(row(null).el); }, 220);
+        toastAction('Notiz erledigt', 'Rückgängig', () => {
+          if (!db) return;
+          db.deleted = db.deleted.filter((t) => t.id !== n.id);
+          n.updatedAt = Date.now(); db.notes.push(n); scheduleNotes();
+          if (view === 'home') render();
+        });
+      });
+      r.el = el;
+      setTimeout(() => growTa(ta), 0);
+      return r;
+    }
+    const sorted = db.notes.slice().sort((a, b) => a.createdAt - b.createdAt);
+    sorted.forEach((n) => list.append(row(n).el));
+    if (!sorted.length) list.append(row(null).el); // am Anfang steht eine leere Notiz da
+    addBtn.addEventListener('click', () => {
+      const empty = [...list.querySelectorAll('.note-ta')].find((t) => !t.value.trim());
+      if (empty) { empty.focus(); return; }
+      const r = row(null); list.append(r.el); r.el.querySelector('textarea').focus();
+    });
+    return h('section', { class: 'notes', 'aria-label': 'Notizen' },
+      h('div', { class: 'notes-head' }, h('h2', { text: 'Notizen' }), addBtn), list);
+  }
+
   function renderCustomers() {
     const bodyEl = h('div');
     const input = h('input', {
-      type: 'search', class: 'search', placeholder: 'Kunde, ID, Adresse oder Telefon …', value: search,
+      type: 'search', class: 'search', placeholder: 'Kunde, ID, Adresse, Telefon, Gerät …', value: search,
       autocomplete: 'off', oninput: (e) => { search = e.target.value; fill(); },
     });
     function fill() {
       const q = search.trim().toLowerCase();
       const recOf = (g) => custRecFor(g.name, g.id);
-      const hay = (g) => { const r = recOf(g); return [g.name, g.id, r && r.address, r && r.email, ...(r ? r.contacts.flatMap((k) => [k.person, k.phone]) : [])].join('\n').toLowerCase(); };
+      const hay = (g) => { const r = recOf(g); return [g.name, g.id, r && r.address, r && r.email, ...(r ? r.contacts.flatMap((k) => [k.person, k.phone]) : []), ...devicesFor(g.name, g.id).flatMap((d) => [d.label, d.serial])].join('\n').toLowerCase(); };
       const list = customerGroups()
         .filter((g) => !q || hay(g).includes(q))
         .sort((a, b) => a.name.localeCompare(b.name, 'de'));
@@ -1710,6 +1880,24 @@
             class: 'btn sec', type: 'button', style: 'margin-top:10px', text: custHasInfo(rec) ? 'Kontaktdaten bearbeiten' : 'Kontaktdaten hinzufügen',
             onclick: async () => { if (await editContact(g.name, g.id) && view === 'customer') render(); },
           })),
+        h('div', { class: 'sect' }, h('h2', { text: 'Geräte' }),
+          (() => {
+            const devs = devicesFor(g.name, g.id);
+            const openDev = async (d) => {
+              const r = await editDevice(g.name, g.id, d);
+              if (r && r.newEntry) { entryForDevice(g.entries[0].customerName || g.name, g.id, r, 'customer'); return; }
+              if (view === 'customer') render();
+            };
+            const uses = (d) => g.entries.filter((e) => d.serial && String(e.serial || '').toLowerCase() === d.serial.toLowerCase()).length;
+            return [
+              ...(devs.length ? devs.map((d) => h('button', { class: 'listrow', type: 'button', onclick: () => openDev(d) },
+                h('span', { class: 'subtext' }, h('span', { class: 'subtitle', text: d.label || d.serial || '(ohne Angaben)' }),
+                  h('span', { class: 'muted small', text: [d.label && d.serial && 'SN ' + d.serial, typeNameOf(d), (() => { const n = uses(d); return n ? `${n} ${n === 1 ? 'Einsatz' : 'Einsätze'}` : ''; })()].filter(Boolean).join(' · ') || 'Noch keine Einsätze' })),
+                icon('next')))
+                : [h('p', { class: 'muted small', style: 'margin:0 0 10px', text: 'Noch keine Geräte hinterlegt. Im Eintrag lassen sie sich dann auswählen.' })]),
+              h('button', { class: 'btn sec', type: 'button', text: '+ Gerät hinzufügen', onclick: () => openDev(null) }),
+            ];
+          })()),
         h('div', { class: 'sect' },
           h('div', { class: 'kv' }, h('span', { text: 'Kunden-ID' }), h('b', { text: g.id || '–' })),
           h('div', { class: 'kv' }, h('span', { text: 'Einsätze' }), h('b', { text: String(g.entries.length) })),
@@ -1719,9 +1907,9 @@
         h('button', {
           class: 'btn', type: 'button', style: 'margin-bottom:18px', text: 'Neuer Eintrag für diesen Kunden',
           onclick: () => {
-            const e = newEntry();
-            e.customerName = g.entries[0].customerName || ''; e.customerId = g.id;
-            editing = { entry: e, isNew: true, back: 'customer' }; go('edit');
+            // Hat der Kunde genau ein Gerät, ist es gleich eingetragen
+            const devs = devicesFor(g.name, g.id);
+            entryForDevice(g.entries[0].customerName || '', g.id, devs.length === 1 ? devs[0] : null, 'customer');
           },
         }),
         usable.length ? h('div', { class: 'sect' }, h('h2', { text: 'Verlauf eines Messwerts' }), sel, histEl) : null,
@@ -1968,12 +2156,12 @@
     name.input.addEventListener('change', () => {
       const m = sorted.find((e) => e.customerName === name.input.value.trim() && e.customerId);
       if (m && !cid.input.value.trim()) cid.input.value = m.customerId;
-      updContact();
+      updContact(); updDevice();
     });
     cid.input.addEventListener('change', () => {
       const m = sorted.find((e) => e.customerId && e.customerId === cid.input.value.trim() && e.customerName);
       if (m && !name.input.value.trim()) name.input.value = m.customerName;
-      updContact();
+      updContact(); updDevice();
     });
 
     /* ---- Ausgetauschte Teile (Reparatur) ---- */
@@ -2074,10 +2262,12 @@
         warn.replaceChildren(); if (tx) warn.append(h('span', { 'aria-hidden': 'true', text: '⚠ ' }), tx);
       };
       inp.addEventListener('input', () => { vals[i] = inp.value; upd(); refreshFolds(); });
-      const el = h('label', { class: 'f' },
-        h('span', {}, f.name || 'Messwert ' + (i + 1), f.unit && h('span', { class: 'unit', text: ' [' + f.unit + ']' }),
+      // Raster: Name, Wert und Einheit in einer Zeile; Bereich und Warnung darunter über die ganze Breite
+      inp.setAttribute('aria-label', (f.name || 'Messwert ' + (i + 1)) + (f.unit ? ' in ' + f.unit : ''));
+      const el = h('label', { class: 'measrow' },
+        h('span', { class: 'mname' }, f.name || 'Messwert ' + (i + 1),
           t && !t.fields.includes(i) && h('span', { class: 'unit', text: ' (nicht in dieser Geräteart)' })),
-        inp, range, warn);
+        inp, h('span', { class: 'munit', text: f.unit || '' }), range, warn);
       upd();
       measInputs.push({ i, inp, el });
       measBox.append(el);
@@ -2173,6 +2363,42 @@
       ? h('p', { class: 'muted small', text: 'Mehrfachauswahl. Speichern geht auch ohne Messgerät.' })
       : h('p', { class: 'muted small', text: 'Noch keine Messgeräte angelegt. Das geht unter Einstellungen > Messgeräte.' });
 
+    /* ---- Gerät des Kunden (seit 1.8) ---- */
+    // Hat der Kunde Geräte, lassen sie sich auswählen: Seriennummer und Geräteart werden eingetragen.
+    const deviceBox = h('div', { class: 'devpick' });
+    function updDevice() {
+      deviceBox.replaceChildren();
+      const nm = name.input.value.trim(); const c = cid.input.value.trim();
+      if (!nm && !c) return;
+      const devs = devicesFor(nm, c);
+      const sn = serial.input.value.trim().toLowerCase();
+      if (devs.length) {
+        const sel = h('select', { 'aria-label': 'Gerät des Kunden' },
+          h('option', { value: '', text: '– Gerät des Kunden wählen –' }),
+          devs.map((d) => h('option', { value: d.id, text: deviceTitle(d) + (typeNameOf(d) ? ' · ' + typeNameOf(d) : ''), selected: !!sn && d.serial.toLowerCase() === sn })));
+        sel.addEventListener('change', () => {
+          const d = devs.find((x) => x.id === sel.value);
+          if (!d) return;
+          serial.input.value = d.serial;
+          if (d.deviceType && [...typeSel.options].some((o) => o.value === d.deviceType) && typeSel.value !== d.deviceType) {
+            typeSel.value = d.deviceType; typeSel.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+          updDevice(); scheduleDraft();
+        });
+        deviceBox.append(h('label', { class: 'f' }, h('span', { text: 'Gerät des Kunden' }), sel));
+      }
+      if (sn && nm && !devs.some((d) => d.serial.toLowerCase() === sn)) {
+        deviceBox.append(h('button', {
+          class: 'btn link small-btn devsave', type: 'button', text: '+ Seriennummer als Gerät beim Kunden speichern',
+          onclick: async () => {
+            const r = await editDevice(nm, c, null, { serial: serial.input.value.trim(), deviceType: typeSel.value, deviceTypeName: (typeById.get(typeSel.value) || {}).name || '' });
+            if (r && view === 'edit') updDevice();
+          },
+        }));
+      }
+    }
+    serial.input.addEventListener('input', updDevice);
+
     /* ---- Aufklappbare Abschnitte ---- */
     const folds = {};
     function fold(key, title, body) {
@@ -2212,7 +2438,7 @@
     }
     swMeas.inp.addEventListener('change', applyKind);
     swParts.inp.addEventListener('change', applyKind);
-    buildMeas(); updKindText(); applyKind(); refreshFolds(); updContact();
+    buildMeas(); updKindText(); applyKind(); refreshFolds(); updContact(); updDevice();
 
     const err = h('div', { class: 'err' });
     updateDayHint();
@@ -2278,7 +2504,7 @@
         if (back === 'calendar') { const p = out.date.split('-'); cal = { y: Number(p[0]), m: Number(p[1]) - 1 }; calDay = out.date; }
         // Im Eintrag bleiben: Er gilt jetzt als gespeichert (Vergleichsstand neu), raus geht es mit dem Zurück-Pfeil.
         const y = window.scrollY;
-        editing = { entry: out, isNew: false, back, open };
+        editing = { entry: out, isNew: false, back, open, justSaved: true };
         render(); window.scrollTo(0, y);
         toast('Gespeichert.');
       }
@@ -2303,9 +2529,15 @@
       toast('Kopie mit Kundendaten angelegt.');
     }
 
+    // Kurze Rückmeldung nach dem Speichern direkt am Knopf
+    const saveBtn = h('button', { class: 'btn' + (editing.justSaved ? ' saved' : ''), type: 'button', onclick: onSave, text: editing.justSaved ? '✓ Gespeichert' : 'Speichern' });
+    if (editing.justSaved) {
+      editing.justSaved = false;
+      setTimeout(() => { if (saveBtn.isConnected) { saveBtn.textContent = 'Speichern'; saveBtn.classList.remove('saved'); } }, 1500);
+    }
     const main = h('main', { class: 'wrap' },
       dl, dlKind,
-      h('div', { class: 'sect' }, h('h2', { text: 'Kunde und Gerät' }), name.el, contactBox, h('div', { class: 'row' }, cid.el, serial.el), typeField),
+      h('div', { class: 'sect' }, h('h2', { text: 'Kunde und Gerät' }), name.el, contactBox, h('div', { class: 'row' }, cid.el, serial.el), deviceBox, typeField),
       h('div', { class: 'sect' }, h('h2', { text: 'Einsatz' }), date.el, kindField, sonstBox),
       h('div', { class: 'sect' }, h('h2', { text: 'Zeiten' }),
         legacyBox,
@@ -2315,8 +2547,7 @@
       partsFold, measFold, toolsFold,
       h('div', { class: 'sect' }, h('h2', { text: 'Notiz' }), note),
       err,
-      h('div', { class: 'footer-actions' },
-        h('button', { class: 'btn', type: 'button', onclick: onSave, text: 'Speichern' })),
+      h('div', { class: 'footer-actions' }, saveBtn),
       !isNew && h('div', { class: 'row sec-actions' },
         h('button', { class: 'btn sec', type: 'button', onclick: onCopy, text: 'Kopie anlegen' }),
         h('button', { class: 'btn danger', type: 'button', onclick: onDelete, text: 'Löschen' })));

@@ -103,8 +103,13 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--accent);outline-
 .row:has(.dur)>*{min-width:150px}
 .row:has(> label.f){align-items:flex-end} /* Felder nebeneinander auf gleicher Höhe, auch wenn eine Beschriftung umbricht */
 .dur em{font-style:normal;color:var(--muted);font-size:calc(14px*var(--fs))}
-.meas{display:grid;grid-template-columns:1fr 1fr;gap:10px 10px}
-.meas label.f{margin:0}
+.meas{display:grid;grid-template-columns:minmax(0,1fr) minmax(92px,32%) minmax(28px,auto);gap:8px 10px;align-items:center}
+.measrow{display:contents}
+.mname{font-size:calc(15px*var(--fs));font-weight:600;overflow-wrap:anywhere;line-height:1.25}
+.munit{color:var(--muted);font-size:calc(14px*var(--fs));font-weight:600}
+.meas input{text-align:right}
+.meas .range,.meas .oor-text{grid-column:1/-1;margin-top:-4px}
+.meas .range{text-align:right}
 .meas .unit{color:var(--muted);font-weight:500}
 
 /* Buttons */
@@ -332,6 +337,35 @@ a.clink .ico{color:var(--accent)}
 .cardline{display:flex;align-items:center;gap:6px;margin-top:6px;font-size:calc(13px*var(--fs));color:var(--muted);overflow:hidden;text-overflow:ellipsis}
 .cardline .ico{width:16px;height:16px;flex:none}
 [hidden]{display:none!important}
+/* Kleine Animationen (seit 1.8), sparsam; aus bei "Bewegung reduzieren" */
+@keyframes fb-in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+@keyframes fb-up{from{opacity:.5;transform:translateY(28px)}to{opacity:1;transform:none}}
+@keyframes fb-fade{from{opacity:0}to{opacity:1}}
+@keyframes fb-pop{0%{transform:scale(1)}40%{transform:scale(1.03)}100%{transform:scale(1)}}
+#app.enter main{animation:fb-in .18s ease-out}
+.fold-body:not([hidden]){animation:fb-in .16s ease-out}
+.overlay{animation:fb-fade .15s ease-out}
+.modal{animation:fb-up .2s ease-out}
+.toast{animation:fb-fade .18s ease-out}
+.btn.saved{background:var(--ok);color:#fff;animation:fb-pop .3s ease-out}
+@media (prefers-color-scheme: dark){.btn.saved{color:#06121f}}
+.note.done{opacity:0;transform:translateX(14px);transition:opacity .2s ease-out,transform .2s ease-out}
+@media (prefers-reduced-motion: reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+/* Notizen auf der Startseite */
+.notes{margin:0 0 16px;padding:12px 14px;border:1px solid var(--line);border-radius:var(--r);background:var(--card);box-shadow:var(--shadow)}
+.notes-head{display:flex;align-items:center;justify-content:space-between}
+.notes-head h2{margin:0;font-size:calc(13px*var(--fs));text-transform:uppercase;letter-spacing:.05em;color:var(--head)}
+.btn.note-add{width:auto;min-height:44px;padding:8px 6px}
+.note{display:flex;align-items:flex-start;gap:10px;padding:4px 0;border-top:1px solid var(--line)}
+.note:first-child{border-top:0}
+.note-check{flex:none;width:30px;height:30px;margin:7px 0 0;border:2px solid var(--edge);border-radius:50%;background:var(--card);cursor:pointer;padding:0}
+.note-check:active{background:color-mix(in srgb,var(--ok) 30%,var(--card))}
+textarea.note-ta{min-height:44px;height:44px;padding:9px 4px;border:0;background:transparent;resize:none;overflow:hidden;line-height:1.35}
+textarea.note-ta:focus{outline:2px solid var(--accent);border-radius:8px}
+.toast.act{display:flex;align-items:center;gap:14px}
+.toast-btn{border:0;background:none;color:inherit;font-weight:700;text-decoration:underline;padding:6px 2px;min-height:40px;cursor:pointer}
+.devpick .f{margin-top:-2px}
+.btn.devsave{margin:-6px 0 8px;text-align:left;padding-left:0}
 @media print{
   :root{--bg:#fff;--card:#fff;--text:#000;--muted:#333;--line:#999;--accent:#000;--head:#000;--navy:#fff}
   body::before{display:none}

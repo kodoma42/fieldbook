@@ -5,8 +5,8 @@ Diese App wurde vollständig mit KI erstellt, die Ideen kamen von einem Menschen
 Verschlüsselte Erfassung von Kunde, Kunden-ID, Datum, Art des Einsatzes (Installation, Wartung, Reparatur,
 Sonstiges), Geräteart, Anfahrt, Abfahrt, Arbeitszeit, Seriennummer, bis zu 50 frei benennbaren Messwerten mit
 Grenzen je Geräteart, ausgetauschten Teilen, verwendeten eigenen Messgeräten und einer Notiz mit einstellbaren
-Standardtexten. Dazu eine Startseite, Kundenansicht mit Adresse und Kontaktdaten, Datumsfilter und ein Kalender
-mit Spesen-Hinweis.
+Standardtexten. Dazu eine Startseite mit Notizen zum Abhaken, Kundenansicht mit Adresse, Kontaktdaten und den Geräten
+des Kunden, Datumsfilter und ein Kalender mit Spesen-Hinweis.
 Alle Daten bleiben lokal auf dem Gerät, es gibt keinen Server und kein Konto.
 Angezeigt wird "Work Companion Fieldbook", unter dem Icon auf dem Home-Bildschirm kurz "Fieldbook".
 
@@ -22,6 +22,11 @@ Erst dann Passwort und Face ID einrichten.
 
 ## Versionen
 
+- **1.8** (02.11.2026): Geräte pro Kunde (Bezeichnung, Seriennummer, Geräteart) in der Kundenansicht; im Eintrag
+  lässt sich das Gerät auswählen, Seriennummer und Geräteart werden eingetragen; neue Seriennummern lassen sich direkt
+  als Gerät speichern. Notizen auf der Startseite zum Abhaken (mit "Rückgängig"), automatisch und verschlüsselt
+  gespeichert. Messwerte als Raster (Name, Wert, Einheit in einer Zeile). Kleine Animationen (Einblenden, Rückmeldung
+  am Speichern-Knopf); sie entfallen, wenn auf dem iPhone "Bewegung reduzieren" eingeschaltet ist.
 - **1.7** (23.10.2026): Startseite nach dem Start der App (Bereiche, Datum, letztes Backup) und Home-Button oben
   neben dem Sperren; nach dem Sperren geht es an dieselbe Stelle zurück. Einstellungen in Untermenüs (Allgemein,
   Darstellung, Einträge, Gerätearten, Messgeräte, Sicherheit, Daten). Gerätearten mit eigenen Messfeldern und

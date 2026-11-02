@@ -50,6 +50,8 @@ regelmäßige Backups werden empfohlen.
   sonst kommt die Startseite (ein Entwurf öffnet sich trotzdem).
 - **Kontaktdaten der Kunden** (Adresse, Telefon, E-Mail) sind verschlüsselt gespeichert, stehen aber lesbar im
   CSV-Export. Die Karten-Links öffnen Apple Karten über maps.apple.com; dabei geht die Adresse an Apple.
+- **Notizen auf der Startseite** werden kurz nach dem Tippen verschlüsselt gespeichert. Was in der letzten halben
+  Sekunde vor einem Absturz getippt wurde, kann fehlen. Abgehakte Notizen sind gelöscht (kurz "Rückgängig" möglich).
 - **Messwert-Grenzen** sind nur ein Hinweis (Farbe und Text), keine Prüfung und keine Sperre. Die App warnt nicht bei
   abgelaufener Kalibrierung der eigenen Messgeräte; sie zeigt nur das eingetragene Datum.
 - **Gerätearten und ihre Grenzen** gehören zu den Einstellungen und sind deshalb ebenfalls nicht verschlüsselt.
@@ -64,4 +66,4 @@ regelmäßige Backups werden empfohlen.
 - **Getestet** wurde mit automatischen Tests in Chromium und im Alltagstest durch den Ideengeber (läuft noch), nicht
   systematisch auf verschiedenen iPhone-Modellen und iOS-Versionen.
 
-Stand: 23.10.2026
+Stand: 02.11.2026
